@@ -1,0 +1,94 @@
+{
+  "name": "video-downloader-app",
+  "version": "1.0.0",
+  "description": "基于Electron和TypeScript的视频下载器，使用yt-dlp和ffmpeg",
+  "main": "dist/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "npm run build && electron . --dev",
+    "build": "npm run build:main && npm run build:renderer && npm run build:preload",
+    "build:main": "tsc src/main.ts --outDir dist --target ES2020 --module CommonJS --moduleResolution node --esModuleInterop --skipLibCheck --forceConsistentCasingInFileNames --allowSyntheticDefaultImports --resolveJsonModule --declaration --declarationMap --sourceMap",
+    "build:preload": "tsc src/preload.ts --outDir dist --target ES2020 --module CommonJS --moduleResolution node --esModuleInterop --skipLibCheck --forceConsistentCasingInFileNames --allowSyntheticDefaultImports --resolveJsonModule --declaration --declarationMap --sourceMap",
+    "build:renderer": "tsc src/renderer.ts --outDir dist --target ES2020 --lib ES2020,DOM --moduleResolution node --esModuleInterop --skipLibCheck --forceConsistentCasingInFileNames --allowSyntheticDefaultImports --resolveJsonModule --sourceMap --strict false",
+    "build:types": "tsc src/types.ts --outDir dist --target ES2020 --module CommonJS --moduleResolution node --esModuleInterop --skipLibCheck --forceConsistentCasingInFileNames --allowSyntheticDefaultImports --resolveJsonModule --declaration --declarationMap --sourceMap",
+    "build:watch": "tsc --watch",
+    "dev:watch": "concurrently \"npm run build:watch\" \"wait-on dist/main.js && electron . --dev\"",
+    "clean": "rimraf dist",
+    "rebuild": "npm run clean && npm run build",
+    "download-binaries": "tsc src/download-binaries.ts --outDir dist --target ES2020 --module CommonJS && node dist/download-binaries.js",
+    "check-binaries": "npm run download-binaries -- --check",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --publish=never",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "keywords": [
+    "electron",
+    "typescript",
+    "video",
+    "downloader",
+    "yt-dlp",
+    "ffmpeg"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.8.0",
+    "@typescript-eslint/eslint-plugin": "^6.7.0",
+    "@typescript-eslint/parser": "^6.7.0",
+    "concurrently": "^8.2.0",
+    "electron": "^27.0.0",
+    "electron-builder": "^24.6.4",
+    "eslint": "^8.50.0",
+    "rimraf": "^5.0.0",
+    "typescript": "^5.2.0",
+    "wait-on": "^7.0.0"
+  },
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  },
+  "build": {
+    "appId": "com.videodownloader.app",
+    "productName": "Video Downloader",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "dist/**/*",
+      "index.html",
+      "styles.css",
+      "node_modules/**/*",
+      "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
+      "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}",
+      "!**/node_modules/*.d.ts",
+      "!**/node_modules/.bin",
+      "!**/*.{iml,o,hprof,orig,pyc,pyo,rbc,swp,csproj,sln,xproj}",
+      "!.editorconfig",
+      "!**/._*",
+      "!**/{.DS_Store,.git,.hg,.svn,CVS,RCS,SCCS,.gitignore,.gitattributes}",
+      "!**/{__pycache__,thumbs.db,.flowconfig,.idea,.vs,.nyc_output}",
+      "!**/{appveyor.yml,.travis.yml,circle.yml}",
+      "!**/{npm-debug.log,yarn.lock,.yarn-integrity,.yarn-metadata.json}"
+    ],
+    "extraResources": [
+      {
+        "from": "binaries",
+        "to": "binaries",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "assets/icon.icns"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "assets/icon.png"
+    }
+  }
+}

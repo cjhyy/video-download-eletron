@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Downloader</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎬 Video Downloader</h1>
+            <p>基于 yt-dlp 和 ffmpeg 的视频下载工具</p>
+        </header>
+
+        <main>
+            <!-- 二进制文件状态检查 -->
+            <div class="status-panel" id="statusPanel">
+                <h3>📋 系统状态</h3>
+                <div class="status-item">
+                    <span>yt-dlp:</span>
+                    <span id="ytdlpStatus" class="status-indicator">检查中...</span>
+                </div>
+                <div class="status-item">
+                    <span>ffmpeg:</span>
+                    <span id="ffmpegStatus" class="status-indicator">检查中...</span>
+                </div>
+            </div>
+
+            <!-- URL 输入区域 -->
+            <div class="input-section">
+                <div class="input-group">
+                    <label for="videoUrl">🔗 视频链接:</label>
+                    <input type="url" id="videoUrl" placeholder="请输入视频URL (支持YouTube, Bilibili等平台)" />
+                    <button id="getInfoBtn" class="btn btn-secondary">获取信息</button>
+                </div>
+            </div>
+
+            <!-- 视频信息显示 -->
+            <div class="video-info" id="videoInfo" style="display: none;">
+                <h3>📺 视频信息</h3>
+                <div class="info-content">
+                    <div class="info-item">
+                        <strong>标题:</strong>
+                        <span id="videoTitle">-</span>
+                    </div>
+                    <div class="info-item">
+                        <strong>上传者:</strong>
+                        <span id="videoUploader">-</span>
+                    </div>
+                    <div class="info-item">
+                        <strong>时长:</strong>
+                        <span id="videoDuration">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 下载选项 -->
+            <div class="download-options" id="downloadOptions" style="display: none;">
+                <h3>⚙️ 下载选项</h3>
+                
+                <div class="option-group">
+                    <label for="downloadPath">📁 下载路径:</label>
+                    <div class="path-input">
+                        <input type="text" id="downloadPath" readonly placeholder="选择下载目录" />
+                        <button id="selectPathBtn" class="btn btn-secondary">选择目录</button>
+                        <button id="openFolderBtn" class="btn btn-secondary" style="display: none;">打开文件夹</button>
+                    </div>
+                </div>
+
+                <div class="option-group">
+                    <label>🎯 下载类型:</label>
+                    <div class="radio-group">
+                        <label class="radio-label">
+                            <input type="radio" name="downloadType" value="video" checked>
+                            <span>视频 (最高质量)</span>
+                        </label>
+                        <label class="radio-label">
+                            <input type="radio" name="downloadType" value="audio">
+                            <span>音频 (MP3)</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="option-group" id="formatGroup">
+                    <label for="videoFormat">🎥 视频格式:</label>
+                    <select id="videoFormat">
+                        <option value="">自动选择最佳质量</option>
+                    </select>
+                </div>
+
+                <button id="downloadBtn" class="btn btn-primary" disabled>
+                    <span class="btn-text">开始下载</span>
+                    <span class="btn-icon">⬇️</span>
+                </button>
+            </div>
+
+            <!-- 下载进度 -->
+            <div class="progress-section" id="progressSection" style="display: none;">
+                <h3>📊 下载进度</h3>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                    <span class="progress-text" id="progressText">0%</span>
+                </div>
+                <div class="progress-info">
+                    <span id="downloadSize">大小: -</span>
+                    <span id="downloadSpeed">速度: -</span>
+                </div>
+                <div class="progress-status" id="progressStatus"></div>
+            </div>
+
+            <!-- 日志区域 -->
+            <div class="log-section">
+                <h3>📝 操作日志</h3>
+                <div class="log-content" id="logContent">
+                    <div class="log-entry">应用启动完成</div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="dist/renderer.js"></script>
+</body>
+</html>
