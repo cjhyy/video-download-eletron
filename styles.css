@@ -253,6 +253,58 @@ select:focus {
     border-color: #667eea;
 }
 
+/* 复选框样式 */
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    margin-bottom: 10px;
+}
+
+.checkbox-label input[type="checkbox"] {
+    margin: 0;
+    transform: scale(1.2);
+}
+
+/* 限流输入区域 */
+.rate-limit-input {
+    margin-top: 15px;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border: 1px solid #e9ecef;
+}
+
+.rate-limit-input label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: #495057;
+}
+
+.rate-limit-input input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 2px solid #e9ecef;
+    border-radius: 6px;
+    font-size: 14px;
+    margin-bottom: 8px;
+}
+
+.rate-limit-input input:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.rate-limit-input small {
+    color: #6c757d;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
 /* 进度区域 */
 .progress-section {
     margin-bottom: 25px;
@@ -411,4 +463,66 @@ select:focus {
 
 .log-content::-webkit-scrollbar-thumb:hover {
     background: #a8a8a8;
+}
+
+/* Cookie 设置样式 */
+.cookie-section {
+    margin-top: 15px;
+    padding: 15px;
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+}
+
+.cookie-input {
+    margin-top: 10px;
+    padding: 10px;
+    background: #ffffff;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+}
+
+.cookie-input label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 500;
+    color: #495057;
+}
+
+.cookie-input input[type="text"] {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 14px;
+    margin-bottom: 5px;
+}
+
+.cookie-input small {
+    display: block;
+    color: #6c757d;
+    font-size: 12px;
+    line-height: 1.4;
+    margin-top: 5px;
+}
+
+.cookie-input small.warning {
+    color: #dc3545;
+    font-weight: 500;
+}
+
+.cookie-methods {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 15px;
+}
+
+.cookie-method-content {
+    margin-top: 10px;
+}
+
+.btn-small {
+    padding: 6px 12px;
+    font-size: 13px;
+    margin-left: 10px;
 }

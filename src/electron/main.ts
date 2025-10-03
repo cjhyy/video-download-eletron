@@ -41,17 +41,35 @@ interface BinaryStatus {
 // IPC 通道名称常量
 const IPCChannels = {
   SELECT_DOWNLOAD_DIRECTORY: 'select-download-directory',
+  SELECT_COOKIE_FILE: 'select-cookie-file',
+  COPY_COOKIE_FILE: 'copy-cookie-file',
   GET_VIDEO_INFO: 'get-video-info',
   DOWNLOAD_VIDEO: 'download-video',
   OPEN_FOLDER: 'open-folder',
   CHECK_BINARIES: 'check-binaries',
+  UPDATE_YT_DLP: 'update-yt-dlp',
   DOWNLOAD_PROGRESS: 'download-progress',
   DOWNLOAD_ERROR: 'download-error',
-  EXPORT_COOKIES: 'export-cookies'
+  EXPORT_COOKIES: 'export-cookies',
+  LOGIN_AND_GET_COOKIES: 'login-and-get-cookies',
+  CLEAR_COOKIE_CACHE: 'clear-cookie-cache'
 } as const;
 
 // 保持对窗口对象的全局引用
 let mainWindow: BrowserWindow | null = null;
+
+// 获取Cookie缓存目录
+function getCookieCacheDir(): string {
+  const tempDir = app.getPath('temp');
+  const cookieDir = path.join(tempDir, 'yt-dlp-cookie');
+  
+  // 确保目录存在
+  if (!fs.existsSync(cookieDir)) {
+    fs.mkdirSync(cookieDir, { recursive: true });
+  }
+  
+  return cookieDir;
+}
 
 // 读取配置文件
 function loadConfig() {
@@ -101,8 +119,8 @@ function getBinaryPath(binaryName: string): string {
 function createWindow(): void {
   // 创建浏览器窗口
   mainWindow = new BrowserWindow({
-    width: 1000,
-    height: 700,
+    width: 1200,
+    height: 800,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -112,8 +130,14 @@ function createWindow(): void {
     show: false
   });
 
-  // 加载应用的 index.html
-  mainWindow.loadFile('index.html');
+  // 开发模式下加载Vite服务器，生产模式加载打包后的文件
+  if (process.env.VITE_DEV_SERVER_URL) {
+    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
+    // 开发模式下打开开发者工具
+    mainWindow.webContents.openDevTools();
+  } else {
+    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+  }
 
   // 窗口准备好后显示
   mainWindow.once('ready-to-show', () => {
@@ -124,11 +148,6 @@ function createWindow(): void {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
-
-  // 开发模式下打开开发者工具
-  if (process.argv.includes('--dev')) {
-    mainWindow.webContents.openDevTools();
-  }
 }
 
 // 修复 GPU 进程问题
@@ -184,6 +203,57 @@ ipcMain.handle(IPCChannels.SELECT_DOWNLOAD_DIRECTORY, async (): Promise<string |
   }
   
   return null;
+});
+
+// 选择Cookie文件
+ipcMain.handle(IPCChannels.SELECT_COOKIE_FILE, async (): Promise<string | null> => {
+  if (!mainWindow) return null;
+  
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    filters: [
+      { name: 'Cookie文件', extensions: ['txt'] },
+      { name: '所有文件', extensions: ['*'] }
+    ],
+    title: '选择Cookie文件'
+  });
+  
+  if (!result.canceled && result.filePaths.length > 0) {
+    return result.filePaths[0];
+  }
+  
+  return null;
+});
+
+// 复制Cookie文件到本地目录
+ipcMain.handle(IPCChannels.COPY_COOKIE_FILE, async (_event, sourcePath: string, domain: string): Promise<{ success: boolean; cookieFile?: string; error?: string }> => {
+  try {
+    // 验证源文件是否存在
+    if (!fs.existsSync(sourcePath)) {
+      return { success: false, error: '源文件不存在' };
+    }
+
+    // 验证文件扩展名
+    if (!sourcePath.toLowerCase().endsWith('.txt')) {
+      return { success: false, error: '只支持.txt格式的Cookie文件' };
+    }
+
+    // 获取Cookie缓存目录
+    const cookieDir = getCookieCacheDir();
+    
+    // 清理域名，生成目标文件名
+    const safeDomain = domain.replace(/[^a-zA-Z0-9.-]/g, '-').toLowerCase();
+    const targetPath = path.join(cookieDir, `${safeDomain}.txt`);
+
+    // 复制文件
+    fs.copyFileSync(sourcePath, targetPath);
+    
+    console.log(`[${new Date().toLocaleTimeString()}] Cookie文件已复制: ${sourcePath} -> ${targetPath}`);
+    return { success: true, cookieFile: targetPath };
+  } catch (error) {
+    console.error(`[${new Date().toLocaleTimeString()}] 复制Cookie文件失败:`, error);
+    return { success: false, error: (error as Error).message };
+  }
 });
 
 // 获取视频信息
@@ -254,7 +324,16 @@ ipcMain.handle(IPCChannels.GET_VIDEO_INFO, async (_event, url: string, useBrowse
     childProcess.stderr?.on('data', (data: Buffer) => {
       const chunk = data.toString();
       stderr += chunk;
-      console.log(`[${new Date().toLocaleTimeString()}] yt-dlp stderr: ${chunk}`);
+      
+      // 过滤非关键警告
+      if (chunk.includes('WARNING') && 
+          (chunk.includes('SABR') || 
+           chunk.includes('Some tv client') ||
+           chunk.includes('have been skipped'))) {
+        console.log(`[${new Date().toLocaleTimeString()}] yt-dlp警告(已过滤): ${chunk.trim()}`);
+      } else {
+        console.log(`[${new Date().toLocaleTimeString()}] yt-dlp stderr: ${chunk}`);
+      }
     });
 
     childProcess.on('close', (code: number | null) => {
@@ -277,11 +356,23 @@ ipcMain.handle(IPCChannels.GET_VIDEO_INFO, async (_event, url: string, useBrowse
               ext: f.ext,
               quality: f.quality,
               filesize: f.filesize,
-              format_note: f.format_note
+              filesize_approx: f.filesize_approx,
+              format_note: f.format_note,
+              width: f.width,
+              height: f.height,
+              fps: f.fps,
+              vcodec: f.vcodec,
+              acodec: f.acodec,
+              tbr: f.tbr,
+              vbr: f.vbr,
+              abr: f.abr
             })) || []
           };
           
           console.log(`[${new Date().toLocaleTimeString()}] 视频信息处理完成，格式数量: ${result.formats.length}`);
+          if (result.formats.length > 0) {
+            console.log(`[${new Date().toLocaleTimeString()}] 格式示例:`, result.formats[0]);
+          }
           resolve(result);
         } catch (e) {
           const error = `Failed to parse video info: ${(e as Error).message}`;
@@ -430,7 +521,21 @@ ipcMain.handle(IPCChannels.DOWNLOAD_VIDEO, async (event, options: DownloadOption
 
     childProcess.stderr?.on('data', (data: Buffer) => {
       const error = data.toString();
-      event.sender.send(IPCChannels.DOWNLOAD_ERROR, error);
+      
+      // 过滤掉非关键警告信息
+      if (error.includes('WARNING') && 
+          (error.includes('SABR') || 
+           error.includes('Some tv client') ||
+           error.includes('have been skipped'))) {
+        // 这些是YouTube的实验性警告，不影响下载，只记录到控制台
+        console.log(`[${new Date().toLocaleTimeString()}] yt-dlp警告: ${error.trim()}`);
+        return;
+      }
+      
+      // 只发送真正的错误
+      if (error.includes('ERROR')) {
+        event.sender.send(IPCChannels.DOWNLOAD_ERROR, error);
+      }
     });
 
     childProcess.on('close', (code: number | null) => {
@@ -465,6 +570,88 @@ ipcMain.handle(IPCChannels.CHECK_BINARIES, async (): Promise<BinaryStatus> => {
       ffmpeg: ffmpegPath
     }
   };
+});
+
+// 更新 yt-dlp
+ipcMain.handle(IPCChannels.UPDATE_YT_DLP, async (): Promise<{ success: boolean; message?: string; error?: string }> => {
+  return new Promise((resolve) => {
+    const ytDlpPath = getBinaryPath('yt-dlp');
+    
+    if (!fs.existsSync(ytDlpPath)) {
+      resolve({ success: false, error: 'yt-dlp 未找到' });
+      return;
+    }
+    
+    console.log(`[${new Date().toLocaleTimeString()}] 开始更新 yt-dlp...`);
+    console.log(`[${new Date().toLocaleTimeString()}] yt-dlp 路径: ${ytDlpPath}`);
+    
+    // 使用 -U 或 --update 参数更新
+    const args = ['-v', '-U'];
+    const childProcess = spawn(ytDlpPath, args);
+    
+    let stdout = '';
+    let stderr = '';
+    
+    childProcess.stdout?.on('data', (data: Buffer) => {
+      const output = data.toString();
+      stdout += output;
+      console.log(`[${new Date().toLocaleTimeString()}] yt-dlp 更新输出: ${output.trim()}`);
+    });
+    
+    childProcess.stderr?.on('data', (data: Buffer) => {
+      const output = data.toString();
+      stderr += output;
+      console.log(`[${new Date().toLocaleTimeString()}] yt-dlp 更新错误: ${output.trim()}`);
+    });
+    
+    childProcess.on('close', (code: number | null) => {
+      console.log(`[${new Date().toLocaleTimeString()}] yt-dlp 更新进程结束，退出码: ${code}`);
+      
+      if (code === 0) {
+        // 检查输出判断是否已经是最新版本
+        if (stdout.includes('already up to date') || stdout.includes('已是最新版本')) {
+          resolve({ 
+            success: true, 
+            message: 'yt-dlp 已经是最新版本' 
+          });
+        } else if (stdout.includes('Updated') || stdout.includes('更新成功')) {
+          resolve({ 
+            success: true, 
+            message: 'yt-dlp 更新成功！' 
+          });
+        } else {
+          resolve({ 
+            success: true, 
+            message: stdout.trim() || 'yt-dlp 更新完成' 
+          });
+        }
+      } else {
+        const errorMsg = stderr || stdout || '更新失败';
+        console.error(`[${new Date().toLocaleTimeString()}] yt-dlp 更新失败: ${errorMsg}`);
+        
+        // 检查是否是因为没有权限
+        if (errorMsg.includes('Permission denied') || errorMsg.includes('权限')) {
+          resolve({ 
+            success: false, 
+            error: '更新失败：权限不足。请尝试以管理员身份运行应用。' 
+          });
+        } else {
+          resolve({ 
+            success: false, 
+            error: `更新失败: ${errorMsg}` 
+          });
+        }
+      }
+    });
+    
+    childProcess.on('error', (error: Error) => {
+      console.error(`[${new Date().toLocaleTimeString()}] yt-dlp 更新进程错误:`, error);
+      resolve({ 
+        success: false, 
+        error: `更新进程错误: ${error.message}` 
+      });
+    });
+  });
 });
 
 // 导出Chrome Cookies
@@ -524,4 +711,126 @@ ipcMain.handle(IPCChannels.EXPORT_COOKIES, async (): Promise<{ success: boolean;
       resolve({ success: false, error: 'Cookie导出超时（30秒）' });
     }, 30000);
   });
+});
+
+// 登录并获取Cookies
+ipcMain.handle(IPCChannels.LOGIN_AND_GET_COOKIES, async (_event, url: string, domain: string): Promise<{ success: boolean; cookieFile?: string; error?: string }> => {
+  return new Promise((resolve) => {
+    // 创建登录窗口
+    const loginWindow = new BrowserWindow({
+      width: 1000,
+      height: 700,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        session: require('electron').session.defaultSession
+      },
+      title: '登录以获取Cookie - 登录成功后请关闭此窗口',
+      autoHideMenuBar: true
+    });
+
+    loginWindow.loadURL(url);
+
+    let resolved = false;
+
+    // 当窗口关闭时提取cookies
+    loginWindow.on('closed', async () => {
+      if (resolved) return;
+      resolved = true;
+
+      try {
+        // 获取所有cookies
+        const cookies = await require('electron').session.defaultSession.cookies.get({});
+        
+        console.log(`[${new Date().toLocaleTimeString()}] 获取到 ${cookies.length} 个Cookie`);
+        
+        if (cookies.length === 0) {
+          resolve({ success: false, error: '未获取到Cookie，请确保已完成登录' });
+          return;
+        }
+
+        // 将cookies保存为Netscape格式，使用专门的Cookie目录
+        const cookieDir = getCookieCacheDir();
+        // 清理域名，移除特殊字符
+        const safeDomain = domain.replace(/[^a-zA-Z0-9.-]/g, '-').toLowerCase();
+        const cookieFile = path.join(cookieDir, `${safeDomain}.txt`);
+        
+        // Netscape格式：domain flag path secure expiration name value
+        let cookieContent = '# Netscape HTTP Cookie File\n';
+        cookieContent += '# This is a generated file! Do not edit.\n\n';
+        
+        cookies.forEach(cookie => {
+          const domain = cookie.domain.startsWith('.') ? cookie.domain : '.' + cookie.domain;
+          const flag = 'TRUE';
+          const cookiePath = cookie.path || '/';
+          const secure = cookie.secure ? 'TRUE' : 'FALSE';
+          const expiration = cookie.expirationDate ? Math.floor(cookie.expirationDate) : '0';
+          const name = cookie.name;
+          const value = cookie.value;
+          
+          cookieContent += `${domain}\t${flag}\t${cookiePath}\t${secure}\t${expiration}\t${name}\t${value}\n`;
+        });
+
+        fs.writeFileSync(cookieFile, cookieContent, 'utf8');
+        console.log(`[${new Date().toLocaleTimeString()}] Cookie文件已创建: ${cookieFile}`);
+        console.log(`[${new Date().toLocaleTimeString()}] Cookie内容长度: ${cookieContent.length} 字符`);
+        
+        resolve({ success: true, cookieFile });
+      } catch (error) {
+        console.error(`[${new Date().toLocaleTimeString()}] Cookie提取失败:`, error);
+        resolve({ success: false, error: (error as Error).message });
+      }
+    });
+
+    // 添加一个提示页面
+    loginWindow.webContents.on('did-finish-load', () => {
+      loginWindow.webContents.executeJavaScript(`
+        // 添加一个浮动提示
+        const hint = document.createElement('div');
+        hint.innerHTML = '<div style="position:fixed;top:10px;right:10px;background:#4caf50;color:white;padding:15px 20px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.2);z-index:999999;font-family:Arial;font-size:14px;">✅ 登录成功后请关闭此窗口以保存Cookie</div>';
+        document.body.appendChild(hint);
+      `).catch(() => {
+        // 某些页面可能不允许执行脚本，忽略错误
+      });
+    });
+  });
+});
+
+// 清除Cookie缓存
+ipcMain.handle(IPCChannels.CLEAR_COOKIE_CACHE, async (): Promise<{ success: boolean; message?: string; error?: string }> => {
+  try {
+    const cookieDir = getCookieCacheDir();
+    
+    if (!fs.existsSync(cookieDir)) {
+      return { success: true, message: 'Cookie缓存目录不存在，无需清理' };
+    }
+
+    // 读取目录中的所有文件
+    const files = fs.readdirSync(cookieDir);
+    let deletedCount = 0;
+
+    // 删除所有 .txt 文件
+    for (const file of files) {
+      if (file.endsWith('.txt')) {
+        const filePath = path.join(cookieDir, file);
+        try {
+          fs.unlinkSync(filePath);
+          deletedCount++;
+          console.log(`[${new Date().toLocaleTimeString()}] 已删除Cookie文件: ${file}`);
+        } catch (err) {
+          console.error(`[${new Date().toLocaleTimeString()}] 删除文件失败: ${file}`, err);
+        }
+      }
+    }
+
+    const message = deletedCount > 0 
+      ? `成功清除 ${deletedCount} 个Cookie缓存文件` 
+      : 'Cookie缓存目录为空';
+    
+    console.log(`[${new Date().toLocaleTimeString()}] ${message}`);
+    return { success: true, message };
+  } catch (error) {
+    console.error(`[${new Date().toLocaleTimeString()}] 清除Cookie缓存失败:`, error);
+    return { success: false, error: (error as Error).message };
+  }
 });

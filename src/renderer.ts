@@ -19,6 +19,10 @@ interface DownloadOptions {
   outputPath: string;
   format?: string;
   audioOnly: boolean;
+  rateLimit?: string;
+  useBrowserCookies?: boolean;
+  browserPath?: string;
+  cookieFile?: string;
 }
 
 interface DownloadProgress {
@@ -39,10 +43,11 @@ interface BinaryStatus {
 
 interface ElectronAPI {
   selectDownloadDirectory: () => Promise<string | null>;
-  getVideoInfo: (url: string) => Promise<VideoInfo>;
+  getVideoInfo: (url: string, useBrowserCookies?: boolean, browserPath?: string, cookieFile?: string) => Promise<VideoInfo>;
   downloadVideo: (options: DownloadOptions) => Promise<{ success: boolean }>;
   openFolder: (folderPath: string) => Promise<void>;
   checkBinaries: () => Promise<BinaryStatus>;
+  exportCookies: () => Promise<{ success: boolean; cookieFile?: string; error?: string }>;
   onDownloadProgress: (callback: (progress: DownloadProgress) => void) => void;
   onDownloadError: (callback: (error: string) => void) => void;
   removeAllListeners: (channel: string) => void;
@@ -62,6 +67,12 @@ interface DOMElements {
   // 输入相关
   videoUrl: HTMLInputElement;
   getInfoBtn: HTMLButtonElement;
+  useBrowserCookies: HTMLInputElement;
+  cookieInput: HTMLElement;
+  browserPath: HTMLInputElement;
+  cookieFile: HTMLInputElement;
+  selectCookieFileBtn: HTMLButtonElement;
+  autoExportCookiesBtn: HTMLButtonElement;
   
   // 视频信息
   videoInfo: HTMLElement;
@@ -75,6 +86,8 @@ interface DOMElements {
   selectPathBtn: HTMLButtonElement;
   openFolderBtn: HTMLButtonElement;
   videoFormat: HTMLSelectElement;
+  enableRateLimit: HTMLInputElement;
+  rateLimit: HTMLInputElement;
   downloadBtn: HTMLButtonElement;
   
   // 进度相关
@@ -127,6 +140,12 @@ class VideoDownloaderApp {
       // 输入相关
       videoUrl: getElementById('videoUrl') as HTMLInputElement,
       getInfoBtn: getElementById('getInfoBtn') as HTMLButtonElement,
+      useBrowserCookies: getElementById('useBrowserCookies') as HTMLInputElement,
+      cookieInput: getElementById('cookieInput'),
+      browserPath: getElementById('browserPath') as HTMLInputElement,
+      cookieFile: getElementById('cookieFile') as HTMLInputElement,
+      selectCookieFileBtn: getElementById('selectCookieFileBtn') as HTMLButtonElement,
+      autoExportCookiesBtn: getElementById('autoExportCookiesBtn') as HTMLButtonElement,
       
       // 视频信息
       videoInfo: getElementById('videoInfo'),
@@ -140,6 +159,8 @@ class VideoDownloaderApp {
       selectPathBtn: getElementById('selectPathBtn') as HTMLButtonElement,
       openFolderBtn: getElementById('openFolderBtn') as HTMLButtonElement,
       videoFormat: getElementById('videoFormat') as HTMLSelectElement,
+      enableRateLimit: getElementById('enableRateLimit') as HTMLInputElement,
+      rateLimit: getElementById('rateLimit') as HTMLInputElement,
       downloadBtn: getElementById('downloadBtn') as HTMLButtonElement,
       
       // 进度相关
@@ -179,6 +200,50 @@ class VideoDownloaderApp {
         }
       });
     });
+
+    // 限流勾选框切换
+    this.elements.enableRateLimit.addEventListener('change', () => {
+      const rateLimitGroup = document.getElementById('rateLimitGroup');
+      if (rateLimitGroup) {
+        rateLimitGroup.style.display = this.elements.enableRateLimit.checked ? 'block' : 'none';
+      }
+    });
+
+    // Cookie勾选框切换
+    this.elements.useBrowserCookies.addEventListener('change', () => {
+      this.elements.cookieInput.style.display = this.elements.useBrowserCookies.checked ? 'block' : 'none';
+    });
+
+    // Cookie方法切换
+    document.querySelectorAll('input[name="cookieMethod"]').forEach(radio => {
+      radio.addEventListener('change', (e) => {
+        const target = e.target as HTMLInputElement;
+        const browserCookieInput = document.getElementById('browserCookieInput');
+        const fileCookieInput = document.getElementById('fileCookieInput');
+        if (browserCookieInput && fileCookieInput) {
+          browserCookieInput.style.display = target.value === 'browser' ? 'block' : 'none';
+          fileCookieInput.style.display = target.value === 'file' ? 'block' : 'none';
+        }
+      });
+    });
+
+    // Cookie文件选择按钮
+    this.elements.selectCookieFileBtn.addEventListener('click', async () => {
+      try {
+        const selectedPath = await window.electronAPI.selectDownloadDirectory();
+        if (selectedPath) {
+          // 注意：这里selectDownloadDirectory实际上只能选择目录
+          // 如果需要选择文件，需要添加新的IPC方法
+          this.elements.cookieFile.value = selectedPath;
+          this.addLog(`Cookie文件路径已设置: ${selectedPath}`, 'success');
+        }
+      } catch (error) {
+        this.addLog(`选择Cookie文件失败: ${(error as Error).message}`, 'error');
+      }
+    });
+
+    // 自动导出Cookie按钮
+    this.elements.autoExportCookiesBtn.addEventListener('click', () => this.autoExportCookies());
 
     // 监听下载进度
     window.electronAPI.onDownloadProgress((progress: DownloadProgress) => {
@@ -276,7 +341,26 @@ class VideoDownloaderApp {
     
     try {
       this.addLog('正在调用 yt-dlp 获取视频详情...', 'info');
-      this.state.currentVideoInfo = await window.electronAPI.getVideoInfo(url);
+      const useBrowserCookies = this.elements.useBrowserCookies.checked;
+      const cookieMethodElement = document.querySelector('input[name="cookieMethod"]:checked') as HTMLInputElement;
+      const cookieMethod = cookieMethodElement?.value || 'browser';
+      const browserPath = this.elements.browserPath.value.trim();
+      const cookieFile = this.elements.cookieFile.value.trim();
+      
+      if (useBrowserCookies) {
+        if (cookieMethod === 'file' && cookieFile) {
+          this.addLog(`使用Cookie文件: ${cookieFile}`, 'info');
+        } else {
+          this.addLog(`从Chrome浏览器读取Cookie (自动检测)`, 'info');
+        }
+      }
+      
+      this.state.currentVideoInfo = await window.electronAPI.getVideoInfo(
+        url, 
+        useBrowserCookies && cookieMethod === 'browser', 
+        browserPath,
+        cookieMethod === 'file' ? cookieFile : undefined
+      );
       
       const endTime = Date.now();
       const duration = endTime - startTime;
@@ -313,6 +397,39 @@ class VideoDownloaderApp {
     } finally {
       this.elements.getInfoBtn.disabled = false;
       this.elements.getInfoBtn.textContent = '获取信息';
+    }
+  }
+
+  // 自动导出Cookie
+  private async autoExportCookies(): Promise<void> {
+    this.elements.autoExportCookiesBtn.disabled = true;
+    this.elements.autoExportCookiesBtn.textContent = '导出中...';
+    this.addLog('开始自动导出Chrome Cookies...', 'info');
+    
+    try {
+      const result = await window.electronAPI.exportCookies();
+      
+      if (result.success && result.cookieFile) {
+        this.elements.cookieFile.value = result.cookieFile;
+        // 自动切换到文件模式
+        const fileRadio = document.querySelector('input[name="cookieMethod"][value="file"]') as HTMLInputElement;
+        if (fileRadio) {
+          fileRadio.checked = true;
+          fileRadio.dispatchEvent(new Event('change'));
+        }
+        this.addLog(`Cookie导出成功: ${result.cookieFile}`, 'success');
+        this.addLog('已自动切换到"Cookie文件"模式', 'success');
+      } else {
+        this.addLog(`Cookie导出失败: ${result.error || '未知错误'}`, 'error');
+        if (result.error && result.error.includes('Could not copy')) {
+          this.addLog('提示: 请先关闭所有Chrome浏览器窗口，然后重试', 'error');
+        }
+      }
+    } catch (error) {
+      this.addLog(`Cookie导出失败: ${(error as Error).message}`, 'error');
+    } finally {
+      this.elements.autoExportCookiesBtn.disabled = false;
+      this.elements.autoExportCookiesBtn.textContent = '🚀 自动导出Cookie';
     }
   }
 
@@ -354,11 +471,19 @@ class VideoDownloaderApp {
     const downloadType = downloadTypeElement?.value || 'video';
     const selectedFormat = this.elements.videoFormat.value;
     
+    const cookieMethodElement = document.querySelector('input[name="cookieMethod"]:checked') as HTMLInputElement;
+    const cookieMethod = cookieMethodElement?.value || 'browser';
+    const useBrowserCookies = this.elements.useBrowserCookies.checked;
+    
     const downloadOptions: DownloadOptions = {
       url: this.elements.videoUrl.value.trim(),
       outputPath: this.state.downloadPath,
       format: selectedFormat,
-      audioOnly: downloadType === 'audio'
+      audioOnly: downloadType === 'audio',
+      rateLimit: this.elements.enableRateLimit.checked ? this.elements.rateLimit.value.trim() : undefined,
+      useBrowserCookies: useBrowserCookies && cookieMethod === 'browser',
+      browserPath: this.elements.browserPath.value.trim(),
+      cookieFile: cookieMethod === 'file' ? this.elements.cookieFile.value.trim() : undefined
     };
     
     this.state.isDownloading = true;
@@ -369,6 +494,16 @@ class VideoDownloaderApp {
     
     this.addLog(`开始下载: ${this.state.currentVideoInfo.title}`, 'info');
     this.addLog(`下载类型: ${downloadType === 'audio' ? '音频' : '视频'}`, 'info');
+    if (this.elements.enableRateLimit.checked && this.elements.rateLimit.value.trim()) {
+      this.addLog(`限流设置: ${this.elements.rateLimit.value.trim()}`, 'info');
+    }
+    if (useBrowserCookies) {
+      if (cookieMethod === 'file' && downloadOptions.cookieFile) {
+        this.addLog(`使用Cookie文件: ${downloadOptions.cookieFile}`, 'info');
+      } else {
+        this.addLog(`从Chrome浏览器读取Cookie`, 'info');
+      }
+    }
     
     try {
       await window.electronAPI.downloadVideo(downloadOptions);
