@@ -1,24 +1,10 @@
-export interface DownloadTask {
-  id: string;
-  url: string;
-  title: string;
-  status: 'pending' | 'downloading' | 'completed' | 'failed' | 'paused';
-  progress: number;
-  outputPath: string;
-  format?: string;
-  audioOnly: boolean;
-  error?: string;
-  addedAt: Date;
-  completedAt?: Date;
-  retryCount: number;
-  maxRetries: number;
-}
+import type { DownloadTask } from './types';
 
 export class DownloadQueueManager {
   private tasks: Map<string, DownloadTask> = new Map();
   private listeners: Set<(tasks: DownloadTask[]) => void> = new Set();
   private currentDownload: string | null = null;
-  private maxConcurrent: number = 1; // 同时下载数量
+  private maxConcurrent: number = 1; // 同时下载数量（预留）
   private autoStartCallback: (() => void) | null = null;
 
   addTask(task: Omit<DownloadTask, 'id' | 'status' | 'progress' | 'addedAt' | 'retryCount' | 'maxRetries'>): string {
@@ -34,14 +20,14 @@ export class DownloadQueueManager {
     };
     this.tasks.set(id, newTask);
     this.notifyListeners();
-    
+
     // 自动触发下载队列处理
     if (this.autoStartCallback) {
       setTimeout(() => {
         this.autoStartCallback?.();
       }, 100);
     }
-    
+
     return id;
   }
 
@@ -77,9 +63,7 @@ export class DownloadQueueManager {
   }
 
   getAllTasks(): DownloadTask[] {
-    return Array.from(this.tasks.values()).sort(
-      (a, b) => b.addedAt.getTime() - a.addedAt.getTime()
-    );
+    return Array.from(this.tasks.values()).sort((a, b) => b.addedAt.getTime() - a.addedAt.getTime());
   }
 
   getPendingTasks(): DownloadTask[] {
@@ -121,6 +105,6 @@ export class DownloadQueueManager {
   }
 }
 
-// 单例
-export const downloadQueue = new DownloadQueueManager();
+
+
 

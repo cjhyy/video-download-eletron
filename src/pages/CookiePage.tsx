@@ -1,45 +1,52 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Box,
-  Card,
-  CardContent,
-  TextField,
-  Button,
-  Typography,
-  Divider,
-  Alert,
-  Stack,
-  IconButton,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemSecondaryAction,
-  Radio,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Chip,
-  FormControlLabel,
-  Checkbox,
-} from '@mui/material';
-import {
-  Delete as DeleteIcon,
+  Trash2 as DeleteIcon,
   Edit as EditIcon,
   Cookie as CookieIcon,
-  CleaningServices as CleanIcon,
-  UploadFile as UploadFileIcon,
+  Eraser as CleanIcon,
+  Upload as UploadFileIcon,
   FolderOpen as FolderOpenIcon,
-} from '@mui/icons-material';
-import { useAppConfig, CookieProfile } from '../context/AppContext';
+  Globe as GlobeIcon,
+  Plus as PlusIcon,
+  Loader2,
+  X,
+} from 'lucide-react';
+import { useConfigStore } from '@/store/configStore';
+import type { CookieProfile } from '@/store/types';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { toast } from 'sonner';
+import { useConfirmStore } from '@/store/confirmStore';
 
-const CookiePage: React.FC = () => {
-  const { config, updateConfig } = useAppConfig();
+interface CookiePageProps {
+  isEmbedded?: boolean;
+}
+
+const CookiePage: React.FC<CookiePageProps> = ({ isEmbedded }) => {
+  const config = useConfigStore((s) => s.config);
+  const updateConfig = useConfigStore((s) => s.updateConfig);
+  const confirm = useConfirmStore((s) => s.confirm);
   const [cookieEnabled, setCookieEnabled] = useState(false);
   const [cookieFile, setCookieFile] = useState('');
   const [cookieExporting, setCookieExporting] = useState(false);
   const [cookieMethod, setCookieMethod] = useState<'file' | 'login'>('login');
   const [loginUrl, setLoginUrl] = useState('https://www.youtube.com');
+  const [presetSite, setPresetSite] = useState<'youtube' | 'bilibili' | 'tiktok'>('youtube');
 
   // 多Cookie配置相关状态
   const [cookieProfiles, setCookieProfiles] = useState<CookieProfile[]>([]);
@@ -69,8 +76,15 @@ const CookiePage: React.FC = () => {
   }, [config.cookieEnabled, config.cookieFile, config.cookieProfiles, config.activeCookieProfileId]);
 
   // 删除Cookie配置
-  const handleDeleteProfile = (profileId: string) => {
-    if (confirm('确定要删除此Cookie配置吗？')) {
+  const handleDeleteProfile = async (profileId: string) => {
+    const isConfirmed = await confirm({
+      title: '删除配置',
+      description: '确定要删除此 Cookie 配置吗？',
+      variant: 'destructive',
+      confirmText: '删除',
+    });
+
+    if (isConfirmed) {
       const newProfiles = cookieProfiles.filter(p => p.id !== profileId);
       setCookieProfiles(newProfiles);
 
@@ -85,6 +99,7 @@ const CookiePage: React.FC = () => {
         cookieEnabled: newActiveId !== null,
         cookieFile: newActiveId ? newProfiles.find(p => p.id === newActiveId)?.cookieFile || '' : '',
       });
+      toast.success('配置已删除');
     }
   };
 
@@ -102,6 +117,7 @@ const CookiePage: React.FC = () => {
         cookieEnabled: true,
         cookieFile: profile.cookieFile,
       });
+      toast.success(`已切换至配置: ${profile.name}`);
     }
   };
 
@@ -117,7 +133,7 @@ const CookiePage: React.FC = () => {
   // 保存编辑的配置
   const handleSaveProfile = () => {
     if (!profileName.trim() || !profileDomain.trim() || !profileCookieFile.trim()) {
-      alert('请填写完整信息');
+      toast.error('请填写完整信息');
       return;
     }
 
@@ -140,12 +156,13 @@ const CookiePage: React.FC = () => {
       setProfileName('');
       setProfileDomain('');
       setProfileCookieFile('');
+      toast.success('配置已更新');
     }
   };
 
   const handleManualEnableCookie = () => {
     if (!cookieFile.trim()) {
-      alert('请先选择Cookie文件');
+      toast.error('请先选择 Cookie 文件');
       return;
     }
 
@@ -206,33 +223,40 @@ const CookiePage: React.FC = () => {
       if (file.path.toLowerCase().endsWith('.txt')) {
         setCookieFile(file.path);
       } else {
-        alert('只支持.txt格式的Cookie文件');
+        toast.error('只支持 .txt 格式的 Cookie 文件');
       }
     }
   };
 
   // 清除Cookie缓存
   const handleClearCookieCache = async () => {
-    if (!confirm('确定要清除所有Cookie缓存文件吗？\n\n这将删除临时目录中所有保存的Cookie文件，但不会影响已配置的Cookie配置。')) {
+    const isConfirmed = await confirm({
+      title: '清除缓存',
+      description: '确定要清除所有 Cookie 缓存文件吗？\n\n这将删除临时目录中所有保存的 Cookie 文件，但不会影响已配置的 Cookie 配置。',
+      variant: 'destructive',
+      confirmText: '清除',
+    });
+
+    if (!isConfirmed) {
       return;
     }
 
     try {
       const result = await window.electronAPI.clearCookieCache();
       if (result.success) {
-        alert(result.message || '清除成功');
-      } else {
-        alert(`清除失败: ${result.error || '未知错误'}`);
+        toast.success(result.message);
+      } else if ('error' in result) {
+        toast.error(`清除失败: ${result.error}`);
       }
     } catch (error: any) {
-      alert(`清除失败: ${error.message}`);
+      toast.error(`清除失败: ${error.message}`);
     }
   };
 
   // 处理创建配置对话框提交
   const handleCreateProfileSubmit = async () => {
     if (!createProfileName.trim() || !createProfileDomain.trim()) {
-      alert('请填写完整信息');
+      toast.error('请填写完整信息');
       return;
     }
 
@@ -240,20 +264,15 @@ const CookiePage: React.FC = () => {
 
     if (createProfileMethod === 'manual') {
       // 手动选择文件方式，复制文件到本地目录
-      (async () => {
-        try {
-          const result = await window.electronAPI.copyCookieFile(pendingCookieFile, createProfileDomain.trim());
-          
-          if (!result.success) {
-            alert(`文件复制失败: ${result.error || '未知错误'}`);
-            return;
-          }
-
+      try {
+        const result = await window.electronAPI.copyCookieFile(pendingCookieFile, createProfileDomain.trim());
+        
+        if (result.success) {
           const newProfile: CookieProfile = {
             id: Date.now().toString(),
             name: createProfileName.trim(),
             domain: createProfileDomain.trim(),
-            cookieFile: result.cookieFile!, // 使用复制后的文件路径
+            cookieFile: result.cookieFile, // 使用复制后的文件路径
             createdAt: new Date().toISOString(),
           };
 
@@ -265,20 +284,24 @@ const CookiePage: React.FC = () => {
           updateConfig({
             ...config,
             cookieEnabled: true,
-            cookieFile: result.cookieFile!,
+            cookieFile: result.cookieFile,
             cookieProfiles: newProfiles,
             activeCookieProfileId: newProfile.id,
           });
 
-          alert(`配置创建成功: ${createProfileName.trim()}\nCookie文件已保存到本地目录`);
+          toast.success(`配置创建成功: ${createProfileName.trim()}`, {
+            description: 'Cookie 文件已保存到本地目录'
+          });
 
           // 清空输入框
           setCookieFile('');
           setPendingCookieFile('');
-        } catch (error: any) {
-          alert(`创建配置失败: ${error.message}`);
+        } else if ('error' in result) {
+          toast.error(`文件复制失败: ${result.error}`);
         }
-      })();
+      } catch (error: any) {
+        toast.error(`创建配置失败: ${error.message}`);
+      }
     } else if (createProfileMethod === 'login') {
       // 浏览器登录方式
       setCookieExporting(true);
@@ -290,14 +313,14 @@ const CookiePage: React.FC = () => {
           urlDomain = parsedUrl.hostname; // 例如: www.youtube.com
         } catch (e) {
           console.error('无法解析URL:', loginUrl);
-          alert('登录网址格式不正确，请检查');
+          toast.error('登录网址格式不正确，请检查');
           setCookieExporting(false);
           return;
         }
         
         // 使用URL的域名作为Cookie文件名
         const result = await window.electronAPI.loginAndGetCookies(loginUrl, urlDomain);
-        if (result.success && result.cookieFile) {
+        if (result.success) {
           // 创建新的Cookie配置
           const newProfile: CookieProfile = {
             id: Date.now().toString(),
@@ -322,12 +345,14 @@ const CookiePage: React.FC = () => {
             activeCookieProfileId: newProfile.id,
           });
 
-          alert(`Cookie获取成功！已自动创建配置: ${createProfileName.trim()}`);
-        } else {
-          alert(`Cookie获取失败: ${result.error || '未知错误'}\n\n请确保已完成登录后再关闭窗口。`);
+          toast.success(`Cookie 获取成功！已自动创建配置: ${createProfileName.trim()}`);
+        } else if ('error' in result) {
+          toast.error(`Cookie 获取失败: ${result.error}`, {
+            description: '请确保已完成登录后再关闭窗口。'
+          });
         }
       } catch (error: any) {
-        alert(`Cookie获取失败: ${error.message}`);
+        toast.error(`Cookie 获取失败: ${error.message}`);
       } finally {
         setCookieExporting(false);
       }
@@ -335,41 +360,41 @@ const CookiePage: React.FC = () => {
   };
 
   return (
-    <Box>
-      <Typography variant="h4" gutterBottom>
-        Cookie配置管理
-      </Typography>
-
-      <Alert severity="info" sx={{ mb: 2 }}>
-        配置Cookie可以解决HTTP 403错误，下载需要登录的视频。支持多个配置，按域名分类管理。
+    <div className="space-y-6">
+      <Alert variant="default" className="bg-blue-50 border-blue-200 dark:bg-blue-900/10 dark:border-blue-900/20">
+        <GlobeIcon className="h-4 w-4 text-blue-600" />
+        <AlertTitle className="text-blue-800 dark:text-blue-400">使用提示</AlertTitle>
+        <AlertDescription className="text-blue-700 dark:text-blue-500/80">
+          配置 Cookie 可以解决 HTTP 403 错误，下载需要登录的视频。支持多个配置，按域名分类管理。
+        </AlertDescription>
       </Alert>
 
-      {/* Cookie全局开关 */}
-      <Card sx={{ mb: 2, bgcolor: cookieEnabled ? '#e8f5e9' : '#fafafa' }}>
-        <CardContent>
-          <Stack direction="row" alignItems="center" justifyContent="space-between">
-            <Stack direction="row" alignItems="center" spacing={2}>
-              <CookieIcon color={cookieEnabled ? 'success' : 'disabled'} />
-              <Box>
-                <Typography variant="h6">
-                  Cookie功能
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {cookieEnabled 
-                    ? '已启用 - 下载时将使用Cookie进行身份验证' 
-                    : '已禁用 - 下载时不使用Cookie（公开视频）'}
-                </Typography>
-              </Box>
-            </Stack>
-            <FormControlLabel
-              control={
+      {/* Cookie 全局开关 */}
+      <div id="cookie-switch" className="scroll-mt-20">
+        <Card className={`${cookieEnabled ? 'border-green-200 bg-green-50/30 dark:border-green-900/20 dark:bg-green-900/5' : ''}`}>
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className={`p-2 rounded-full ${cookieEnabled ? 'bg-green-100 text-green-600' : 'bg-muted text-muted-foreground'}`}>
+                  <CookieIcon className="h-6 w-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold">Cookie 功能</h3>
+                  <p className="text-sm text-muted-foreground">
+                    {cookieEnabled 
+                      ? '已启用 - 下载时将使用 Cookie 进行身份验证' 
+                      : '已禁用 - 下载时不使用 Cookie（仅公开视频）'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center space-x-2 border p-2 rounded-lg bg-background">
                 <Checkbox
+                  id="cookie-enabled"
                   checked={cookieEnabled}
-                  onChange={(e) => {
-                    const enabled = e.target.checked;
+                  onCheckedChange={(checked) => {
+                    const enabled = !!checked;
                     setCookieEnabled(enabled);
                     if (!enabled) {
-                      // 禁用Cookie时，取消激活的配置
                       setActiveCookieProfileId(null);
                       updateConfig({
                         ...config,
@@ -377,346 +402,377 @@ const CookiePage: React.FC = () => {
                         cookieFile: '',
                         activeCookieProfileId: null,
                       });
+                      toast.info('Cookie 功能已禁用');
                     } else if (cookieProfiles.length > 0) {
-                      // 启用Cookie时，如果有配置但没有激活的，提示用户选择
-                      alert('请在下方选择一个Cookie配置');
+                      toast.info('请在下方选择一个 Cookie 配置');
                     }
                   }}
-                  color="success"
-                  size="medium"
                 />
-              }
-              label={<Typography variant="body1" fontWeight="medium">{cookieEnabled ? '启用' : '禁用'}</Typography>}
-              labelPlacement="start"
-            />
-          </Stack>
-        </CardContent>
-      </Card>
+                <Label htmlFor="cookie-enabled" className="text-base font-medium cursor-pointer px-2">
+                  {cookieEnabled ? '已开启' : '已关闭'}
+                </Label>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
-      {/* Cookie配置列表 */}
-      <Card sx={{ mb: 2 }}>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            已保存的配置
-          </Typography>
-          <Divider sx={{ mb: 2 }} />
-
-          {cookieProfiles.length > 0 ? (
-            <Box>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                点击配置选择使用，所有下载任务将使用选中的Cookie
-              </Typography>
-              <List sx={{ bgcolor: '#f5f5f5', borderRadius: 1, p: 0 }}>
-                {cookieProfiles.map((profile) => (
-                  <ListItem
-                    key={profile.id}
-                    sx={{
-                      borderBottom: '1px solid #e0e0e0',
-                      '&:last-child': { borderBottom: 'none' },
-                      cursor: 'pointer',
-                      bgcolor: activeCookieProfileId === profile.id ? '#e3f2fd' : 'transparent',
-                      '&:hover': { bgcolor: activeCookieProfileId === profile.id ? '#e3f2fd' : '#eeeeee' },
-                    }}
-                    onClick={() => handleSelectProfile(profile.id)}
-                  >
-                    <Radio
-                      checked={activeCookieProfileId === profile.id}
-                      value={profile.id}
-                      size="small"
-                    />
-                    <ListItemText
-                      primary={
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          <Typography variant="subtitle1">{profile.name}</Typography>
-                          <Chip label={profile.domain} size="small" color="primary" variant="outlined" />
-                        </Stack>
-                      }
-                      secondary={
-                        <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
-                          Cookie文件: {profile.cookieFile}
-                        </Typography>
-                      }
-                    />
-                    <ListItemSecondaryAction>
-                      <IconButton
-                        edge="end"
-                        size="small"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleOpenEditDialog(profile);
-                        }}
-                        sx={{ mr: 1 }}
+      {/* Cookie 配置列表 */}
+      <div id="cookie-list" className="scroll-mt-20">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">已保存的配置</CardTitle>
+            <CardDescription>
+              点击配置选择使用，所有下载任务将使用选中的 Cookie
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {cookieProfiles.length > 0 ? (
+              <div className="space-y-3">
+                <RadioGroup value={activeCookieProfileId || ''} onValueChange={handleSelectProfile}>
+                  <div className="grid gap-3">
+                    {cookieProfiles.map((profile) => (
+                      <div
+                        key={profile.id}
+                        className={`flex items-center justify-between p-4 rounded-lg border transition-colors cursor-pointer hover:bg-muted/50 ${
+                          activeCookieProfileId === profile.id ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'bg-card'
+                        }`}
+                        onClick={() => handleSelectProfile(profile.id)}
                       >
-                        <EditIcon fontSize="small" />
-                      </IconButton>
-                      <IconButton
-                        edge="end"
-                        size="small"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteProfile(profile.id);
-                        }}
-                        color="error"
-                      >
-                        <DeleteIcon fontSize="small" />
-                      </IconButton>
-                    </ListItemSecondaryAction>
-                  </ListItem>
-                ))}
-              </List>
+                        <div className="flex items-center gap-3 min-w-0">
+                          <RadioGroupItem value={profile.id} id={profile.id} />
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <Label htmlFor={profile.id} className="font-semibold cursor-pointer truncate">
+                                {profile.name}
+                              </Label>
+                              <Badge variant="outline" className="bg-background">{profile.domain}</Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground truncate mt-1">
+                              {profile.cookieFile}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0 ml-4">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenEditDialog(profile);
+                            }}
+                          >
+                            <EditIcon className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteProfile(profile.id);
+                            }}
+                          >
+                            <DeleteIcon className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </RadioGroup>
 
-              {activeCookieProfileId && (
-                <Alert severity="success" sx={{ mt: 2 }} icon={<CookieIcon />}>
-                  ✅ 当前使用: <strong>{cookieProfiles.find(p => p.id === activeCookieProfileId)?.name}</strong>
-                  {' '}({cookieProfiles.find(p => p.id === activeCookieProfileId)?.domain})
-                </Alert>
-              )}
-            </Box>
-          ) : (
-            <Alert severity="info">
-              还没有Cookie配置，请使用下方"获取Cookie"创建配置
-            </Alert>
-          )}
-          
-          <Divider sx={{ my: 2 }} />
-          
-          {/* 清除缓存按钮 */}
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Box>
-              <Typography variant="body2" color="text.secondary">
-                清除Cookie缓存文件
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                删除临时目录中所有Cookie文件，不影响配置
-              </Typography>
-            </Box>
-            <Button
-              variant="outlined"
-              color="warning"
-              startIcon={<CleanIcon />}
-              onClick={handleClearCookieCache}
-              size="small"
-            >
-              清除缓存
-            </Button>
-          </Box>
-        </CardContent>
-      </Card>
-
-      {/* 获取Cookie */}
-      <Card sx={{ mb: 2 }}>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            获取Cookie
-          </Typography>
-          <Divider sx={{ mb: 2 }} />
-
-          <Stack direction="row" spacing={2} sx={{ mb: 2 }} flexWrap="wrap">
-            <Button
-              variant={cookieMethod === 'login' ? 'contained' : 'outlined'}
-              onClick={() => setCookieMethod('login')}
-            >
-              🌐 浏览器登录（推荐）
-            </Button>
-            <Button
-              variant={cookieMethod === 'file' ? 'contained' : 'outlined'}
-              onClick={() => setCookieMethod('file')}
-            >
-              📁 手动选择Cookie文件
-            </Button>
-          </Stack>
-
-          {cookieMethod === 'login' ? (
-            <Box sx={{ width: '100%' }}>
-              <Alert severity="success" sx={{ mb: 2 }}>
-                ✨ <strong>推荐方式：</strong>无需关闭浏览器，支持扫码登录
-              </Alert>
-              <TextField
-                fullWidth
-                label="登录网站"
-                value={loginUrl}
-                onChange={(e) => setLoginUrl(e.target.value)}
-                sx={{ mb: 2 }}
-                helperText="将打开此网站的登录页面，支持账号密码登录和扫码登录"
-              />
-              <Alert severity="info" sx={{ mb: 2 }}>
-                <strong>使用说明：</strong>
-                <br />
-                1. 点击下方按钮，会打开一个浏览器窗口
-                <br />
-                2. 在窗口中登录您的账号（支持扫码登录）
-                <br />
-                3. 登录成功后<strong>关闭登录窗口</strong>
-                <br />
-                4. 输入配置名称和域名
-                <br />
-                5. Cookie会自动保存并创建配置
-              </Alert>
+                {activeCookieProfileId && (
+                  <Alert className="bg-green-50/50 border-green-100 dark:bg-green-900/10 dark:border-green-900/20">
+                    <CookieIcon className="h-4 w-4 text-green-600" />
+                    <AlertDescription className="text-green-800 dark:text-green-400 font-medium">
+                      ✅ 当前使用: {cookieProfiles.find(p => p.id === activeCookieProfileId)?.name} ({cookieProfiles.find(p => p.id === activeCookieProfileId)?.domain})
+                    </AlertDescription>
+                  </Alert>
+                )}
+              </div>
+            ) : (
+              <div className="text-center py-8 border-2 border-dashed rounded-lg bg-muted/20">
+                <CookieIcon className="h-10 w-10 text-muted-foreground mx-auto mb-2 opacity-20" />
+                <p className="text-sm text-muted-foreground">还没有 Cookie 配置，请在下方创建</p>
+              </div>
+            )}
+            
+            <Separator className="my-4" />
+            
+            <div className="flex items-center justify-between bg-muted/30 p-4 rounded-lg">
+              <div className="space-y-0.5">
+                <p className="text-sm font-medium">清除 Cookie 缓存文件</p>
+                <p className="text-xs text-muted-foreground">删除临时目录中所有 Cookie 文件，不影响已保存的配置</p>
+              </div>
               <Button
-                variant="contained"
-                color="primary"
-                onClick={handleLoginAndGetCookies}
-                disabled={cookieExporting}
-                startIcon={cookieExporting ? <Typography>⏳</Typography> : <Typography>🌐</Typography>}
-                size="large"
+                variant="outline"
+                size="sm"
+                className="text-orange-600 border-orange-200 hover:bg-orange-50 hover:text-orange-700 dark:hover:bg-orange-950/20"
+                onClick={handleClearCookieCache}
               >
-                {cookieExporting ? '等待登录...' : '打开登录窗口'}
+                <CleanIcon className="h-4 w-4 mr-2" />
+                清除缓存
               </Button>
-            </Box>
-          ) : (
-            <Box sx={{ width: '100%' }}>
-              <Alert severity="info" sx={{ mb: 2 }}>
-                <strong>推荐使用Chrome扩展：</strong>
-                <br />
-                1. 安装{' '}
-                <a
-                  href="https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ color: '#1976d2', textDecoration: 'underline' }}
-                >
-                  Get cookies.txt LOCALLY
-                </a>
-                <br />
-                2. 访问视频网站并登录
-                <br />
-                3. 点击扩展 → Export → Netscape HTTP Cookie File
-                <br />
-                4. 保存cookies.txt到本地
-                <br />
-                5. 使用下方按钮选择文件或直接拖放Cookie文件
-              </Alert>
-              
-              {/* 拖放区域 */}
-              <Box
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                sx={{
-                  border: isDragging ? '2px dashed #1976d2' : '2px dashed #ccc',
-                  borderRadius: 2,
-                  p: 3,
-                  mb: 2,
-                  textAlign: 'center',
-                  bgcolor: isDragging ? '#e3f2fd' : '#fafafa',
-                  transition: 'all 0.3s',
-                  cursor: 'pointer',
-                }}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* 获取 Cookie */}
+      <div id="get-cookie" className="scroll-mt-20">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">添加 Cookie 配置</CardTitle>
+            <CardDescription>选择一种方式获取 Cookie 并创建配置</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="flex gap-2 p-1 bg-muted rounded-lg">
+              <Button
+                variant={cookieMethod === 'login' ? 'secondary' : 'ghost'}
+                className={`flex-1 ${cookieMethod === 'login' ? 'bg-background shadow-sm' : ''}`}
+                onClick={() => setCookieMethod('login')}
               >
-                <UploadFileIcon sx={{ fontSize: 48, color: isDragging ? '#1976d2' : '#999', mb: 1 }} />
-                <Typography variant="body1" gutterBottom>
-                  {isDragging ? '释放文件以上传' : '拖放Cookie文件到这里'}
-                </Typography>
-                <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
-                  或
-                </Typography>
+                <GlobeIcon className="h-4 w-4 mr-2" />
+                浏览器登录 (推荐)
+              </Button>
+              <Button
+                variant={cookieMethod === 'file' ? 'secondary' : 'ghost'}
+                className={`flex-1 ${cookieMethod === 'file' ? 'bg-background shadow-sm' : ''}`}
+                onClick={() => setCookieMethod('file')}
+              >
+                <UploadFileIcon className="h-4 w-4 mr-2" />
+                手动上传文件
+              </Button>
+            </div>
+
+            {cookieMethod === 'login' ? (
+              <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                <Alert className="bg-primary/5 border-primary/20">
+                  <PlusIcon className="h-4 w-4 text-primary" />
+                  <AlertTitle className="font-semibold text-primary">扫码/登录方式</AlertTitle>
+                  <AlertDescription className="text-sm">
+                    无需关闭浏览器，支持扫码登录。
+                  </AlertDescription>
+                </Alert>
+                
+                <div className="space-y-2">
+                  <Label>站点快捷模板</Label>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant={presetSite === 'youtube' ? 'secondary' : 'outline'}
+                      onClick={() => {
+                        setPresetSite('youtube');
+                        setLoginUrl('https://www.youtube.com');
+                      }}
+                    >
+                      YouTube
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={presetSite === 'bilibili' ? 'secondary' : 'outline'}
+                      onClick={() => {
+                        setPresetSite('bilibili');
+                        setLoginUrl('https://www.bilibili.com');
+                      }}
+                    >
+                      Bilibili
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={presetSite === 'tiktok' ? 'secondary' : 'outline'}
+                      onClick={() => {
+                        setPresetSite('tiktok');
+                        setLoginUrl('https://www.tiktok.com');
+                      }}
+                    >
+                      TikTok
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="login-url">登录网站 URL</Label>
+                  <Input
+                    id="login-url"
+                    placeholder="https://www.youtube.com"
+                    value={loginUrl}
+                    onChange={(e) => setLoginUrl(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">将打开此网站的登录页面，支持账号密码和扫码登录</p>
+                </div>
+
+                <div className="p-4 rounded-lg bg-muted/50 border text-sm space-y-2">
+                  <p className="font-semibold">使用说明:</p>
+                  <ol className="list-decimal list-inside space-y-1 text-muted-foreground">
+                    <li>点击下方按钮，会打开一个浏览器窗口</li>
+                    <li>在窗口中登录您的账号（支持扫码）</li>
+                    <li>登录成功后 <strong>直接关闭</strong> 登录窗口</li>
+                    <li>输入配置名称，Cookie 会自动保存</li>
+                  </ol>
+                </div>
+
                 <Button
-                  variant="contained"
-                  startIcon={<FolderOpenIcon />}
+                  className="w-full h-12"
+                  onClick={handleLoginAndGetCookies}
+                  disabled={cookieExporting}
+                >
+                  {cookieExporting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      等待登录...
+                    </>
+                  ) : (
+                    <>
+                      <GlobeIcon className="mr-2 h-4 w-4" />
+                      打开登录窗口
+                    </>
+                  )}
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                <div className="p-4 rounded-lg bg-muted/50 border text-sm space-y-3">
+                  <p className="font-semibold">推荐使用 Chrome 扩展:</p>
+                  <p className="text-muted-foreground">
+                    1. 安装 <a href="https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-medium inline-flex items-center gap-1">Get cookies.txt LOCALLY</a><br />
+                    2. 访问网站并登录，点击扩展 → Export → Netscape 格式<br />
+                    3. 保存文件并在此处选择或拖放
+                  </p>
+                </div>
+                
+                <div
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  className={`border-2 border-dashed rounded-xl p-8 text-center transition-all cursor-pointer ${
+                    isDragging ? 'border-primary bg-primary/5 scale-[1.01]' : 'border-muted-foreground/20 hover:border-primary/50 bg-muted/10'
+                  }`}
                   onClick={handleSelectCookieFile}
                 >
-                  选择Cookie文件
+                  <div className="flex flex-col items-center gap-2">
+                    <div className={`p-3 rounded-full ${isDragging ? 'bg-primary/20 text-primary' : 'bg-background text-muted-foreground'}`}>
+                      <UploadFileIcon className="h-8 w-8" />
+                    </div>
+                    <div>
+                      <p className="font-medium">{isDragging ? '释放文件' : '点击或拖放 Cookie 文件'}</p>
+                      <p className="text-xs text-muted-foreground mt-1">支持 .txt (Netscape 格式)</p>
+                    </div>
+                  </div>
+                </div>
+
+                {cookieFile && (
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-900/20">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="p-1.5 rounded-md bg-green-100 dark:bg-green-900/30 text-green-600">
+                        <UploadFileIcon className="h-4 w-4" />
+                      </div>
+                      <p className="text-sm font-medium truncate">{cookieFile}</p>
+                    </div>
+                    <Button variant="ghost" size="icon" onClick={() => setCookieFile('')} className="h-7 w-7">
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
+
+                <Button
+                  className="w-full h-12"
+                  onClick={handleManualEnableCookie}
+                  disabled={!cookieFile.trim()}
+                >
+                  创建配置
                 </Button>
-              </Box>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
-              {cookieFile && (
-                <Alert severity="success" sx={{ mb: 2 }} icon={<UploadFileIcon />}>
-                  已选择文件: <strong>{cookieFile}</strong>
-                </Alert>
-              )}
-
-              <Button
-                variant="contained"
-                color="primary"
-                onClick={handleManualEnableCookie}
-                disabled={!cookieFile.trim()}
-                size="large"
-                fullWidth
-              >
-                创建配置
-              </Button>
-            </Box>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Cookie编辑对话框（仅用于编辑） */}
-      {editingProfile && (
-        <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
-          <DialogTitle>编辑Cookie配置</DialogTitle>
-          <DialogContent>
-            <Stack spacing={2} sx={{ mt: 1 }}>
-              <TextField
-                fullWidth
-                label="配置名称"
+      {/* Cookie 编辑对话框 */}
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>编辑 Cookie 配置</DialogTitle>
+            <DialogDescription>
+              修改已保存的 Cookie 配置信息
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-name">配置名称</Label>
+              <Input
+                id="edit-name"
                 value={profileName}
                 onChange={(e) => setProfileName(e.target.value)}
-                placeholder="例如: YouTube账号1"
-                helperText="给这个Cookie配置起个名字"
+                placeholder="例如: 我的 YouTube 账号"
               />
-              <TextField
-                fullWidth
-                label="域名"
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-domain">适用域名</Label>
+              <Input
+                id="edit-domain"
                 value={profileDomain}
                 onChange={(e) => setProfileDomain(e.target.value)}
-                placeholder="例如: youtube.com, bilibili.com"
-                helperText="这个Cookie适用的网站域名"
+                placeholder="例如: youtube.com"
               />
-              <TextField
-                fullWidth
-                label="Cookie文件路径"
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-path">Cookie 文件路径</Label>
+              <Input
+                id="edit-path"
                 value={profileCookieFile}
                 onChange={(e) => setProfileCookieFile(e.target.value)}
-                placeholder="例如: D:\cookies\youtube.txt"
-                helperText="Netscape格式的Cookie文件完整路径"
-                multiline
-                rows={2}
               />
-            </Stack>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setDialogOpen(false)}>取消</Button>
-            <Button onClick={handleSaveProfile} variant="contained" color="primary">
-              保存
-            </Button>
-          </DialogActions>
-        </Dialog>
-      )}
-
-      {/* 创建Cookie配置对话框 */}
-      <Dialog open={createProfileDialogOpen} onClose={() => setCreateProfileDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>创建Cookie配置</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            <TextField
-              fullWidth
-              label="配置名称"
-              value={createProfileName}
-              onChange={(e) => setCreateProfileName(e.target.value)}
-              placeholder="例如: YouTube账号1"
-              helperText="给这个Cookie配置起个名字"
-              autoFocus
-            />
-            <TextField
-              fullWidth
-              label="域名"
-              value={createProfileDomain}
-              onChange={(e) => setCreateProfileDomain(e.target.value)}
-              placeholder="例如: youtube.com, bilibili.com"
-              helperText={createProfileMethod === 'login' ? "已自动从登录网址提取域名（可修改）" : "这个Cookie适用的网站域名"}
-            />
-          </Stack>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>取消</Button>
+            <Button onClick={handleSaveProfile}>保存修改</Button>
+          </DialogFooter>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCreateProfileDialogOpen(false)}>取消</Button>
-          <Button onClick={handleCreateProfileSubmit} variant="contained" color="primary">
-            确定
-          </Button>
-        </DialogActions>
       </Dialog>
-    </Box>
+
+      {/* 创建 Cookie 配置对话框 */}
+      <Dialog open={createProfileDialogOpen} onOpenChange={setCreateProfileDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>创建 Cookie 配置</DialogTitle>
+            <DialogDescription>
+              为新获取的 Cookie 设置一个名称和关联域名
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="create-name">配置名称</Label>
+              <Input
+                id="create-name"
+                value={createProfileName}
+                onChange={(e) => setCreateProfileName(e.target.value)}
+                placeholder="例如: 常用账号"
+                autoFocus
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="create-domain">适用域名</Label>
+              <Input
+                id="create-domain"
+                value={createProfileDomain}
+                onChange={(e) => setCreateProfileDomain(e.target.value)}
+                placeholder="例如: bilibili.com"
+              />
+              <p className="text-xs text-muted-foreground">
+                {createProfileMethod === 'login' ? "已自动从登录网址提取域名（可修改）" : "这个 Cookie 适用的网站域名"}
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateProfileDialogOpen(false)}>取消</Button>
+            <Button onClick={handleCreateProfileSubmit}>确定创建</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 };
 
 export default CookiePage;
-

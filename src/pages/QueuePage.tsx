@@ -1,163 +1,241 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import {
-  Box,
-  Card,
-  CardContent,
-  Typography,
-  List,
-  ListItem,
-  IconButton,
-  LinearProgress,
-  Chip,
-  Button,
-  Stack,
-  Tooltip,
-  Alert,
-  Divider,
-} from '@mui/material';
-import {
-  Delete as DeleteIcon,
-  PlayArrow as PlayIcon,
-  Pause as PauseIcon,
-  Clear as ClearIcon,
-  CheckCircle as CheckCircleIcon,
-  Error as ErrorIcon,
-  HourglassEmpty as PendingIcon,
-  Download as DownloadingIcon,
-  Refresh as RetryIcon,
-} from '@mui/icons-material';
-import { downloadQueue, DownloadTask } from '../utils/downloadQueue';
-import { useAppConfig } from '../context/AppContext';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CheckCircle2, CircleAlert, Loader2, Pause, Play, RefreshCcw, Trash2 } from 'lucide-react';
+import { useConfigStore } from '@/store/configStore';
+import { useQueueStore } from '@/store/queueStore';
+import type { DownloadTask } from '@/store/types';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
+import { Separator } from '@/components/ui/separator';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 const QueuePage: React.FC = () => {
-  const { config } = useAppConfig();
-  const [tasks, setTasks] = useState<DownloadTask[]>([]);
-  const [currentDownloading, setCurrentDownloading] = useState<string | null>(null);
+  const config = useConfigStore((s) => s.config);
+  const tasks = useQueueStore((s) => s.tasks);
+  const updateTask = useQueueStore((s) => s.updateTask);
+  const appendTaskLog = useQueueStore((s) => s.appendTaskLog);
+  const removeTask = useQueueStore((s) => s.removeTask);
+  const retryTask = useQueueStore((s) => s.retryTask);
+  const clearCompleted = useQueueStore((s) => s.clearCompleted);
+  const clearFailed = useQueueStore((s) => s.clearFailed);
+  const getTask = useQueueStore((s) => s.getTask);
+  const [queuePaused, setQueuePaused] = useState(false);
+  const [activeCount, setActiveCount] = useState(0);
+  const activeDownloadIdsRef = useRef<Set<string>>(new Set());
+  const cancelReasonRef = useRef<Map<string, 'pause' | 'remove'>>(new Map());
 
-  // 定义 processQueue 函数（必须在使用它的 useEffect 之前）
-  const processQueue = useCallback(async () => {
-    if (currentDownloading) return; // 已有任务在下载
+  // 使用全局配置中的并发限制
+  const MAX_CONCURRENT_DOWNLOADS = config.maxConcurrentDownloads || 3;
 
-    const pendingTasks = downloadQueue.getPendingTasks();
+  const scheduleDownloads = useCallback(() => {
+    if (queuePaused) return;
+
+    const activeIds = activeDownloadIdsRef.current;
+    if (activeIds.size >= MAX_CONCURRENT_DOWNLOADS) return;
+
+    const pendingTasks = tasks
+      .slice()
+      .filter((t) => t.status === 'pending')
+      .sort((a, b) => (b.addedAt || '').localeCompare(a.addedAt || ''));
     if (pendingTasks.length === 0) return;
 
-    const task = pendingTasks[0];
-    setCurrentDownloading(task.id);
-    downloadQueue.updateTask(task.id, { status: 'downloading' });
-    downloadQueue.setCurrentDownload(task.id);
+    while (activeIds.size < MAX_CONCURRENT_DOWNLOADS && pendingTasks.length > 0 && !queuePaused) {
+      const task = pendingTasks.shift();
+      if (!task) break;
 
-    try {
-      await window.electronAPI.downloadVideo({
-        url: task.url,
-        outputPath: task.outputPath,
-        format: task.format,
-        audioOnly: task.audioOnly,
-        useBrowserCookies: false,
-        browserPath: 'auto',
-        cookieFile: config.cookieEnabled && config.cookieFile ? config.cookieFile : undefined,
-      });
+      activeIds.add(task.id);
+      setActiveCount(activeIds.size);
 
-      downloadQueue.updateTask(task.id, {
-        status: 'completed',
-        progress: 100,
-        completedAt: new Date(),
-      });
-    } catch (error: any) {
-      downloadQueue.updateTask(task.id, {
-        status: 'failed',
-        error: error.message,
-      });
-    } finally {
-      setCurrentDownloading(null);
-      downloadQueue.setCurrentDownload(null);
-      // 处理下一个任务
-      setTimeout(() => processQueue(), 1000);
+      updateTask(task.id, { status: 'downloading' });
+
+      window.electronAPI
+        .downloadVideo({
+          taskId: task.id,
+          url: task.url,
+          outputPath: task.outputPath,
+          format: task.format,
+          audioOnly: task.audioOnly,
+          playlistMode: task.playlistMode,
+          playlistItems: task.playlistItems,
+          playlistEnd: task.playlistEnd,
+          postProcess: task.postProcess,
+          useBrowserCookies: false,
+          browserPath: 'auto',
+          cookieFile: config.cookieEnabled && config.cookieFile ? config.cookieFile : undefined,
+        })
+        .then(() => {
+          updateTask(task.id, {
+            status: 'completed',
+            progress: 100,
+            completedAt: new Date().toISOString(),
+          });
+        })
+        .catch((error: any) => {
+          const reason = cancelReasonRef.current.get(task.id);
+          if (reason === 'pause') {
+            // 被用户暂停：保持 paused 状态即可
+            return;
+          }
+          if (reason === 'remove') {
+            // 被用户停止并移除：忽略即可
+            return;
+          }
+          const tail = error?.details?.stderrTail;
+          const tailText =
+            Array.isArray(tail) && tail.length > 0 ? `\n\n---- stderrTail ----\n${tail.join('\n')}` : '';
+          updateTask(task.id, {
+            status: 'failed',
+            error: (error?.message || String(error)) + tailText,
+          });
+        })
+        .finally(() => {
+          cancelReasonRef.current.delete(task.id);
+          activeIds.delete(task.id);
+          setActiveCount(activeIds.size);
+          // 补齐并发槽位
+          setTimeout(() => scheduleDownloads(), 200);
+        });
     }
-  }, [currentDownloading, config.cookieEnabled, config.cookieFile]);
-
-  // 订阅任务更新和注册自动启动回调
-  useEffect(() => {
-    // 订阅任务更新
-    const unsubscribe = downloadQueue.subscribe((updatedTasks) => {
-      setTasks(updatedTasks);
-    });
-
-    // 初始加载
-    setTasks(downloadQueue.getAllTasks());
-
-    // 注册自动启动回调
-    downloadQueue.setAutoStartCallback(() => {
-      processQueue();
-    });
-
-    return () => {
-      unsubscribe();
-      downloadQueue.setAutoStartCallback(null);
-    };
-  }, [processQueue]);
+  }, [queuePaused, tasks, updateTask, config.cookieEnabled, config.cookieFile]);
 
   // 监听下载进度和错误
   useEffect(() => {
     // 监听下载进度
     const handleProgress = (progressInfo: any) => {
-      const currentId = downloadQueue.getCurrentDownload();
-      if (currentId && progressInfo.percent !== undefined) {
-        downloadQueue.updateTask(currentId, {
-          progress: progressInfo.percent,
-        });
+      if (!progressInfo?.taskId) return;
+      const updates: Partial<DownloadTask> = {};
+      if (progressInfo.percent !== undefined) updates.progress = progressInfo.percent;
+      if (progressInfo.speed !== undefined) updates.speed = progressInfo.speed;
+      if (progressInfo.eta !== undefined) updates.eta = progressInfo.eta;
+      if (progressInfo.size !== undefined) updates.size = progressInfo.size;
+      
+      if (Object.keys(updates).length > 0) {
+        updateTask(progressInfo.taskId, updates);
       }
     };
 
-    const handleError = (error: string) => {
-      const currentId = downloadQueue.getCurrentDownload();
-      if (currentId) {
-        downloadQueue.updateTask(currentId, {
-          status: 'failed',
-          error,
+    const handleError = (payload: any) => {
+      if (!payload?.taskId) return;
+      // 不在这里强制置为 failed：以 downloadVideo Promise 的最终结果为准，避免边界误判
+      updateTask(payload.taskId, {
+        error: payload.error,
+      });
+    };
+
+    const handleLog = (payload: any) => {
+      if (!payload?.taskId || !payload?.message || !payload?.ts) return;
+      appendTaskLog(payload.taskId, {
+        ts: payload.ts,
+        level: payload.level || 'info',
+        message: payload.message,
+      });
+
+      // Fallback: if we see explicit exit code 0 in logs, ensure UI state isn't stuck.
+      if (typeof payload.message === 'string' && payload.message.includes('yt-dlp exited with code 0')) {
+        const t = getTask(payload.taskId);
+        if (t && t.status === 'downloading') {
+          updateTask(payload.taskId, {
+            status: 'completed',
+            progress: 100,
+            completedAt: new Date().toISOString(),
+          });
+        }
+      }
+    };
+
+    const handleDone = (payload: any) => {
+      if (!payload?.taskId) return;
+      // 主进程最终态：这是最可靠的“完成/失败”信号（页面刷新也能恢复）
+      if (payload.success) {
+        updateTask(payload.taskId, {
+          status: 'completed',
+          progress: 100,
+          completedAt: new Date(payload.ts || Date.now()).toISOString(),
+          error: undefined,
         });
-        setCurrentDownloading(null);
-        downloadQueue.setCurrentDownload(null);
-        // 继续处理下一个任务
-        setTimeout(() => processQueue(), 1000);
+      } else {
+        const errMsg = payload?.error?.message || '下载失败';
+        const tail = payload?.error?.details?.stderrTail;
+        const tailText =
+          Array.isArray(tail) && tail.length > 0 ? `\n\n---- stderrTail ----\n${tail.join('\n')}` : '';
+        updateTask(payload.taskId, {
+          status: 'failed',
+          error: errMsg + tailText,
+        });
       }
     };
 
     window.electronAPI.onDownloadProgress(handleProgress);
     window.electronAPI.onDownloadError(handleError);
+    window.electronAPI.onDownloadLog(handleLog);
+    window.electronAPI.onDownloadDone(handleDone);
 
     return () => {
       window.electronAPI.removeAllListeners('download-progress');
       window.electronAPI.removeAllListeners('download-error');
+      window.electronAPI.removeAllListeners('download-log');
+      window.electronAPI.removeAllListeners('download-done');
     };
-  }, [processQueue]);
+  }, [appendTaskLog, updateTask]);
+
+  // 自动开始：当有 pending 且未暂停时，尝试补齐并发槽位
+  useEffect(() => {
+    if (queuePaused) return;
+    if (tasks.some((t) => t.status === 'pending')) {
+      scheduleDownloads();
+    }
+  }, [tasks, queuePaused, scheduleDownloads]);
 
   const handleStartQueue = () => {
-    processQueue();
+    setQueuePaused(false);
+    scheduleDownloads();
   };
 
   const handlePauseQueue = () => {
-    // TODO: 实现暂停功能
-    setCurrentDownloading(null);
+    // 暂停调度：不再启动新任务（不会中断正在下载的任务）
+    setQueuePaused(true);
   };
 
-  const handleRemoveTask = (id: string) => {
-    downloadQueue.removeTask(id);
+  const handlePauseTask = async (id: string) => {
+    const task = getTask(id);
+    if (!task || task.status !== 'downloading') return;
+
+    cancelReasonRef.current.set(id, 'pause');
+    updateTask(id, { status: 'paused' });
+    await window.electronAPI.cancelDownload(id);
+  };
+
+  const handleResumeTask = (id: string) => {
+    const task = getTask(id);
+    if (!task || task.status !== 'paused') return;
+
+    updateTask(id, { status: 'pending', error: undefined });
+    scheduleDownloads();
+  };
+
+  const handleRemoveTask = async (id: string) => {
+    const task = getTask(id);
+    if (task?.status === 'downloading') {
+      cancelReasonRef.current.set(id, 'remove');
+      await window.electronAPI.cancelDownload(id);
+    }
+
+    removeTask(id);
   };
 
   const handleRetryTask = (id: string) => {
-    downloadQueue.retryTask(id);
-    // 如果没有任务在下载，立即开始处理队列
-    if (!currentDownloading) {
-      processQueue();
-    }
+    retryTask(id);
+    scheduleDownloads();
   };
 
   const handleClearCompleted = () => {
-    downloadQueue.clearCompleted();
+    clearCompleted();
   };
 
   const handleClearFailed = () => {
-    downloadQueue.clearFailed();
+    clearFailed();
   };
 
   const handleRetryAllFailed = () => {
@@ -165,42 +243,9 @@ const QueuePage: React.FC = () => {
       (task) => task.status === 'failed' && task.retryCount < task.maxRetries
     );
     failedTasks.forEach((task) => {
-      downloadQueue.retryTask(task.id);
+      retryTask(task.id);
     });
-    // 如果没有任务在下载，立即开始处理队列
-    if (!currentDownloading && failedTasks.length > 0) {
-      processQueue();
-    }
-  };
-
-  const getStatusIcon = (status: DownloadTask['status']) => {
-    switch (status) {
-      case 'pending':
-        return <PendingIcon color="action" />;
-      case 'downloading':
-        return <DownloadingIcon color="primary" />;
-      case 'completed':
-        return <CheckCircleIcon color="success" />;
-      case 'failed':
-        return <ErrorIcon color="error" />;
-      case 'paused':
-        return <PauseIcon color="warning" />;
-    }
-  };
-
-  const getStatusColor = (status: DownloadTask['status']) => {
-    switch (status) {
-      case 'pending':
-        return 'default';
-      case 'downloading':
-        return 'primary';
-      case 'completed':
-        return 'success';
-      case 'failed':
-        return 'error';
-      case 'paused':
-        return 'warning';
-    }
+    if (failedTasks.length > 0) scheduleDownloads();
   };
 
   const getStatusText = (status: DownloadTask['status']) => {
@@ -218,223 +263,240 @@ const QueuePage: React.FC = () => {
     }
   };
 
-  const stats = {
-    total: tasks.length,
-    pending: tasks.filter((t) => t.status === 'pending').length,
-    downloading: tasks.filter((t) => t.status === 'downloading').length,
-    completed: tasks.filter((t) => t.status === 'completed').length,
-    failed: tasks.filter((t) => t.status === 'failed').length,
-  };
+  const stats = useMemo(() => {
+    return {
+      total: tasks.length,
+      pending: tasks.filter((t) => t.status === 'pending').length,
+      downloading: tasks.filter((t) => t.status === 'downloading').length,
+      completed: tasks.filter((t) => t.status === 'completed').length,
+      failed: tasks.filter((t) => t.status === 'failed').length,
+      paused: tasks.filter((t) => t.status === 'paused').length,
+    };
+  }, [tasks]);
 
   return (
-    <Box>
-      <Typography variant="h4" gutterBottom>
-        下载队列
-      </Typography>
+    <TooltipProvider>
+      <div className="space-y-6">
+        <div className="space-y-1">
+          <div className="text-2xl font-semibold tracking-tight">下载队列</div>
+          <div className="text-sm text-muted-foreground">
+            支持并发下载、单任务暂停/继续、停止并移除。
+          </div>
+        </div>
 
-      {/* Cookie状态提示 */}
-      {config.cookieEnabled && config.activeCookieProfileId && config.cookieProfiles && (
-        <Alert severity="success" sx={{ mb: 2 }} icon={<CheckCircleIcon />}>
-          Cookie已启用 - 当前使用: <strong>{config.cookieProfiles.find(p => p.id === config.activeCookieProfileId)?.name}</strong>
-          {' '}({config.cookieProfiles.find(p => p.id === config.activeCookieProfileId)?.domain}) - 队列中的所有任务将使用此Cookie下载
-        </Alert>
-      )}
-      {config.cookieEnabled && !config.activeCookieProfileId && (
-        <Alert severity="success" sx={{ mb: 2 }} icon={<CheckCircleIcon />}>
-          Cookie已启用 - 队列中的所有任务将使用Cookie进行下载
-        </Alert>
-      )}
+        {config.cookieEnabled && (
+          <Alert>
+            <AlertTitle className="flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 text-green-600" />
+              Cookie 已启用
+            </AlertTitle>
+            <AlertDescription>
+              {config.activeCookieProfileId && config.cookieProfiles ? (
+                <span>
+                  当前使用：
+                  <span className="font-medium">
+                    {config.cookieProfiles.find((p) => p.id === config.activeCookieProfileId)?.name}
+                  </span>
+                  （{config.cookieProfiles.find((p) => p.id === config.activeCookieProfileId)?.domain}）
+                </span>
+              ) : (
+                <span>队列中的任务将使用 Cookie 下载（适用于需要登录的视频）。</span>
+              )}
+            </AlertDescription>
+          </Alert>
+        )}
 
-      {/* 统计信息 */}
-      <Card sx={{ mb: 2 }}>
-        <CardContent>
-          <Stack direction="row" spacing={2} sx={{ mb: 2 }}>
-            <Chip label={`总计: ${stats.total}`} />
-            <Chip label={`等待: ${stats.pending}`} color="default" />
-            <Chip label={`下载中: ${stats.downloading}`} color="primary" />
-            <Chip label={`已完成: ${stats.completed}`} color="success" />
-            <Chip label={`失败: ${stats.failed}`} color="error" />
-          </Stack>
-
-          <Stack direction="row" spacing={2} flexWrap="wrap">
-            <Button
-              variant="contained"
-              startIcon={<PlayIcon />}
-              onClick={handleStartQueue}
-              disabled={stats.pending === 0 || currentDownloading !== null}
-            >
-              开始下载
-            </Button>
-            <Button
-              variant="outlined"
-              startIcon={<PauseIcon />}
-              onClick={handlePauseQueue}
-              disabled={!currentDownloading}
-            >
-              暂停队列
-            </Button>
-            <Button
-              variant="outlined"
-              color="warning"
-              startIcon={<RetryIcon />}
-              onClick={handleRetryAllFailed}
-              disabled={stats.failed === 0}
-            >
-              重试失败任务
-            </Button>
-            <Button
-              variant="outlined"
-              color="success"
-              onClick={handleClearCompleted}
-              disabled={stats.completed === 0}
-            >
-              清除已完成
-            </Button>
-            <Button
-              variant="outlined"
-              color="error"
-              onClick={handleClearFailed}
-              disabled={stats.failed === 0}
-            >
-              清除失败
-            </Button>
-          </Stack>
-        </CardContent>
-      </Card>
-
-      {/* 任务列表 */}
-      {tasks.length === 0 ? (
-        <Alert severity="info">队列为空，请在下载页面添加任务</Alert>
-      ) : (
         <Card>
-          <CardContent>
-            <List>
-              {tasks.map((task, index) => (
-                <React.Fragment key={task.id}>
-                  {index > 0 && <Divider />}
-                  <ListItem
-                    sx={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'stretch',
-                      py: 2,
-                    }}
-                  >
-                    <Box
-                      sx={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        width: '100%',
-                        mb: 1,
-                      }}
-                    >
-                      <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
-                        {getStatusIcon(task.status)}
-                        <Box sx={{ ml: 2, flex: 1 }}>
-                          <Typography variant="subtitle1" noWrap>
-                            {task.title}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {task.url}
-                          </Typography>
-                        </Box>
-                      </Box>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">队列概览</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="secondary">总计 {stats.total}</Badge>
+              <Badge variant="outline">等待 {stats.pending}</Badge>
+              <Badge>下载中 {stats.downloading}</Badge>
+              <Badge variant="secondary">暂停 {stats.paused}</Badge>
+              <Badge className="bg-green-600 text-white hover:bg-green-600/90">已完成 {stats.completed}</Badge>
+              <Badge variant="destructive">失败 {stats.failed}</Badge>
+              <Badge variant="outline">
+                并发 {activeCount}/{MAX_CONCURRENT_DOWNLOADS}
+              </Badge>
+            </div>
 
-                      <Stack direction="row" spacing={1} alignItems="center">
-                        <Chip
-                          label={getStatusText(task.status)}
-                          color={getStatusColor(task.status)}
-                          size="small"
-                        />
-                        {task.status === 'failed' && task.retryCount < task.maxRetries && (
-                          <Tooltip title={`重试 (${task.retryCount}/${task.maxRetries})`}>
-                            <IconButton
-                              size="small"
-                              onClick={() => handleRetryTask(task.id)}
-                              color="warning"
-                            >
-                              <RetryIcon />
-                            </IconButton>
-                          </Tooltip>
-                        )}
-                        {task.status !== 'completed' && (
-                          <Tooltip title="删除任务">
-                            <IconButton
-                              size="small"
-                              onClick={() => handleRemoveTask(task.id)}
-                              color="error"
-                            >
-                              <DeleteIcon />
-                            </IconButton>
-                          </Tooltip>
-                        )}
-                      </Stack>
-                    </Box>
-
-                    {/* 进度条 */}
-                    {(task.status === 'downloading' || task.status === 'completed') && (
-                      <Box sx={{ width: '100%' }}>
-                        <Box
-                          sx={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            mb: 0.5,
-                          }}
-                        >
-                          <Typography variant="caption">
-                            进度: {task.progress.toFixed(1)}%
-                          </Typography>
-                        </Box>
-                        <LinearProgress
-                          variant="determinate"
-                          value={task.progress}
-                          color={task.status === 'completed' ? 'success' : 'primary'}
-                        />
-                      </Box>
-                    )}
-
-                    {/* 错误信息 */}
-                    {task.status === 'failed' && task.error && (
-                      <Alert 
-                        severity="error" 
-                        sx={{ mt: 1 }}
-                        action={
-                          task.retryCount < task.maxRetries && (
-                            <Button
-                              color="inherit"
-                              size="small"
-                              startIcon={<RetryIcon />}
-                              onClick={() => handleRetryTask(task.id)}
-                            >
-                              重试 ({task.retryCount}/{task.maxRetries})
-                            </Button>
-                          )
-                        }
-                      >
-                        {task.error}
-                        {task.retryCount >= task.maxRetries && (
-                          <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
-                            已达到最大重试次数
-                          </Typography>
-                        )}
-                      </Alert>
-                    )}
-
-                    {/* 完成时间 */}
-                    {task.status === 'completed' && task.completedAt && (
-                      <Typography variant="caption" color="success.main" sx={{ mt: 1 }}>
-                        完成于: {new Date(task.completedAt).toLocaleString()}
-                      </Typography>
-                    )}
-                  </ListItem>
-                </React.Fragment>
-              ))}
-            </List>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={handleStartQueue} disabled={stats.pending === 0} className="gap-2">
+                <Play className="h-4 w-4" />
+                {queuePaused ? '继续下载' : '开始下载'}
+              </Button>
+              <Button variant="outline" onClick={handlePauseQueue} disabled={queuePaused} className="gap-2">
+                <Pause className="h-4 w-4" />
+                暂停队列
+              </Button>
+              <Button variant="outline" onClick={handleRetryAllFailed} disabled={stats.failed === 0} className="gap-2">
+                <RefreshCcw className="h-4 w-4" />
+                重试失败任务
+              </Button>
+              <Button variant="outline" onClick={handleClearCompleted} disabled={stats.completed === 0}>
+                清除已完成
+              </Button>
+              <Button variant="destructive" onClick={handleClearFailed} disabled={stats.failed === 0}>
+                清除失败
+              </Button>
+            </div>
           </CardContent>
         </Card>
-      )}
-    </Box>
+
+        {tasks.length === 0 ? (
+          <Alert>
+            <AlertTitle>队列为空</AlertTitle>
+            <AlertDescription>请在“视频下载”页面添加任务。</AlertDescription>
+          </Alert>
+        ) : (
+          <div className="space-y-3">
+            {tasks.map((task) => (
+              <Card key={task.id}>
+                <CardContent className="space-y-3 p-4">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 space-y-1">
+                      <div className="truncate font-medium">{task.title}</div>
+                      <div className="truncate text-xs text-muted-foreground">{task.url}</div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge
+                        variant={
+                          task.status === 'failed'
+                            ? 'destructive'
+                            : task.status === 'completed'
+                              ? 'secondary'
+                              : 'outline'
+                        }
+                      >
+                        {getStatusText(task.status)}
+                      </Badge>
+
+                      {task.status === 'downloading' && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              onClick={() => handlePauseTask(task.id)}
+                              aria-label="暂停任务"
+                            >
+                              <Pause className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>暂停任务（可继续）</TooltipContent>
+                        </Tooltip>
+                      )}
+
+                      {task.status === 'paused' && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              onClick={() => handleResumeTask(task.id)}
+                              aria-label="继续任务"
+                            >
+                              <Play className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>继续任务</TooltipContent>
+                        </Tooltip>
+                      )}
+
+                      {task.status === 'failed' && task.retryCount < task.maxRetries && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              onClick={() => handleRetryTask(task.id)}
+                              aria-label="重试任务"
+                            >
+                              <RefreshCcw className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            重试（{task.retryCount}/{task.maxRetries}）
+                          </TooltipContent>
+                        </Tooltip>
+                      )}
+
+                      {task.status !== 'completed' && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="destructive"
+                              size="icon"
+                              onClick={() => handleRemoveTask(task.id)}
+                              aria-label="删除任务"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {task.status === 'downloading' ? '停止并移除任务' : '删除任务'}
+                          </TooltipContent>
+                        </Tooltip>
+                      )}
+                    </div>
+                  </div>
+
+                  {(task.status === 'downloading' || task.status === 'completed') && (
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <div className="flex items-center gap-3">
+                          <span>进度 {task.progress.toFixed(1)}%</span>
+                          {task.status === 'downloading' && task.speed && (
+                            <span className="text-primary font-medium">⚡ {task.speed}</span>
+                          )}
+                          {task.status === 'downloading' && task.eta && (
+                            <span>⏳ 剩余 {task.eta}</span>
+                          )}
+                        </div>
+                        {task.size && <span>{task.size}</span>}
+                      </div>
+                      <Progress value={task.progress} />
+                    </div>
+                  )}
+
+                  {task.status === 'failed' && task.error && (
+                    <Alert variant="destructive">
+                      <AlertTitle className="flex items-center gap-2">
+                        <CircleAlert className="h-4 w-4" />
+                        下载失败
+                      </AlertTitle>
+                      <AlertDescription className="whitespace-pre-wrap break-words">
+                        {task.error}
+                      </AlertDescription>
+                    </Alert>
+                  )}
+
+                  {task.status === 'completed' && task.completedAt && (
+                    <div className="text-xs text-muted-foreground">
+                      完成于：{new Date(task.completedAt).toLocaleString()}
+                    </div>
+                  )}
+
+                  {task.status === 'downloading' && (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      下载中…
+                    </div>
+                  )}
+
+                  <Separator />
+                  <div className="text-xs text-muted-foreground">任务 ID：{task.id}</div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+    </TooltipProvider>
   );
 };
 
