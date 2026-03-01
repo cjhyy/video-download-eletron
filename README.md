@@ -2,6 +2,12 @@
 
 基于 Electron + React + Radix UI 的现代化视频下载器，使用 yt-dlp 和 ffmpeg。
 
+## 截图预览
+
+| 视频下载 | 下载队列 | 设置中心 |
+|:---:|:---:|:---:|
+| ![视频下载](screenshots/download-page.png) | ![下载队列](screenshots/queue-page.png) | ![设置中心](screenshots/settings-page.png) |
+
 ## 功能特性
 
 ### 视频下载

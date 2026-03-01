@@ -17,6 +17,7 @@ interface BinaryStatus {
   ytDlp: boolean;
   ffmpeg: boolean;
   paths: { ytDlp: string; ffmpeg: string };
+  versions?: { ytDlp?: string; ffmpeg?: string };
   bundled?: { ytDlp: boolean; ffmpeg: boolean };
 }
 
@@ -329,8 +330,15 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ hideTitle, section }) => {
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="flex flex-col justify-between gap-2 rounded-lg border p-4">
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-muted-foreground">yt-dlp 状态</span>
-                    <StatusBadge ok={binaryStatus?.ytDlp} />
+                    <span className="text-sm font-medium text-muted-foreground">yt-dlp</span>
+                    <div className="flex items-center gap-2">
+                      {binaryStatus?.versions?.ytDlp && (
+                        <span className="text-xs font-mono text-muted-foreground">
+                          v{binaryStatus.versions.ytDlp}
+                        </span>
+                      )}
+                      <StatusBadge ok={binaryStatus?.ytDlp} />
+                    </div>
                   </div>
                   <div className="mt-1 break-all text-xs font-mono text-muted-foreground">
                     {binaryStatus?.paths.ytDlp || '未检测到路径'}
@@ -351,8 +359,15 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ hideTitle, section }) => {
 
                 <div className="flex flex-col justify-between gap-2 rounded-lg border p-4">
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-muted-foreground">ffmpeg 状态</span>
-                    <StatusBadge ok={binaryStatus?.ffmpeg} />
+                    <span className="text-sm font-medium text-muted-foreground">ffmpeg</span>
+                    <div className="flex items-center gap-2">
+                      {binaryStatus?.versions?.ffmpeg && (
+                        <span className="text-xs font-mono text-muted-foreground">
+                          v{binaryStatus.versions.ffmpeg}
+                        </span>
+                      )}
+                      <StatusBadge ok={binaryStatus?.ffmpeg} />
+                    </div>
                   </div>
                   <div className="mt-1 break-all text-xs font-mono text-muted-foreground">
                     {binaryStatus?.paths.ffmpeg || '未检测到路径'}

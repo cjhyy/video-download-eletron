@@ -148,6 +148,11 @@ export interface BinaryStatus {
     ytDlp: string;
     ffmpeg: string;
   };
+  /** 版本号 */
+  versions?: {
+    ytDlp?: string;
+    ffmpeg?: string;
+  };
   /** 是否使用内置（完整版）的二进制文件 */
   bundled?: {
     ytDlp: boolean;
@@ -181,7 +186,7 @@ export type ExportCookiesResult =
   | { success: false; error: string };
 
 export type LoginAndGetCookiesResult =
-  | { success: true; cookieFile: string }
+  | { success: true; cookieFile: string; username?: string }
   | { success: false; error: string };
 
 export type ClearCookieCacheResult =

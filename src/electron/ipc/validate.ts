@@ -149,9 +149,17 @@ export function validateCookieFile(cookieFile: unknown): string | undefined {
   const p = assertOptionalString(cookieFile, 'cookieFile');
   if (!p) return undefined;
   const normalized = path.normalize(p);
-  if (!fs.existsSync(normalized)) throw new IpcError('NOT_FOUND', 'cookieFile does not exist');
+  // 如果 cookie 文件不存在，返回 undefined 而不是抛出错误
+  // 这样可以在文件被删除后继续下载（不使用 cookie）
+  if (!fs.existsSync(normalized)) {
+    console.warn(`[validateCookieFile] Cookie 文件不存在，将忽略: ${normalized}`);
+    return undefined;
+  }
   const stat = fs.statSync(normalized);
-  if (!stat.isFile()) throw new IpcError('VALIDATION_ERROR', 'cookieFile is not a file');
+  if (!stat.isFile()) {
+    console.warn(`[validateCookieFile] Cookie 路径不是文件，将忽略: ${normalized}`);
+    return undefined;
+  }
   return normalized;
 }
 

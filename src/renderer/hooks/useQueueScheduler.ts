@@ -43,6 +43,12 @@ export function useQueueScheduler(): QueueSchedulerReturn {
   const activeDownloadIdsRef = useRef<Set<string>>(new Set());
   const cancelReasonRef = useRef<Map<string, 'pause' | 'remove'>>(new Map());
   const isSchedulingRef = useRef(false);
+  const queuePausedRef = useRef(false);
+
+  // 保持 queuePausedRef 与 queuePaused 同步
+  useEffect(() => {
+    queuePausedRef.current = queuePaused;
+  }, [queuePaused]);
 
   const MAX_CONCURRENT_DOWNLOADS = config.maxConcurrentDownloads || QUEUE_CONFIG.DEFAULT_MAX_CONCURRENT;
 
@@ -116,7 +122,10 @@ export function useQueueScheduler(): QueueSchedulerReturn {
             cancelReasonRef.current.delete(task.id);
             activeIds.delete(task.id);
             setActiveCount(activeIds.size);
-            setTimeout(() => scheduleDownloads(), QUEUE_CONFIG.SCHEDULE_DELAY_MS);
+            // 只有队列未暂停时才继续调度（使用 ref 获取最新值）
+            if (!queuePausedRef.current) {
+              setTimeout(() => scheduleDownloads(), QUEUE_CONFIG.SCHEDULE_DELAY_MS);
+            }
           });
       }
     } finally {
@@ -128,6 +137,17 @@ export function useQueueScheduler(): QueueSchedulerReturn {
   useEffect(() => {
     const handleProgress = (progressInfo: any) => {
       if (!progressInfo?.taskId) return;
+
+      // 处理 status: 'completed' 事件（来自 ytdlp.ts 第515行）
+      if (progressInfo.status === 'completed') {
+        updateTask(progressInfo.taskId, {
+          status: 'completed',
+          progress: 100,
+          completedAt: new Date().toISOString(),
+        });
+        return;
+      }
+
       const updates: Partial<DownloadTask> = {};
       if (progressInfo.percent !== undefined) updates.progress = progressInfo.percent;
       if (progressInfo.speed !== undefined) updates.speed = progressInfo.speed;
@@ -166,6 +186,14 @@ export function useQueueScheduler(): QueueSchedulerReturn {
 
     const handleDone = (payload: any) => {
       if (!payload?.taskId) return;
+
+      // 从活跃下载列表中移除并更新计数
+      const activeIds = activeDownloadIdsRef.current;
+      if (activeIds.has(payload.taskId)) {
+        activeIds.delete(payload.taskId);
+        setActiveCount(activeIds.size);
+      }
+
       if (payload.success) {
         updateTask(payload.taskId, {
           status: 'completed',
@@ -183,6 +211,11 @@ export function useQueueScheduler(): QueueSchedulerReturn {
           error: errMsg + tailText,
         });
       }
+
+      // 继续调度下一个任务
+      if (!queuePausedRef.current) {
+        setTimeout(() => scheduleDownloads(), QUEUE_CONFIG.SCHEDULE_DELAY_MS);
+      }
     };
 
     window.electronAPI.onDownloadProgress(handleProgress);
@@ -196,7 +229,7 @@ export function useQueueScheduler(): QueueSchedulerReturn {
       window.electronAPI.removeAllListeners('download-log');
       window.electronAPI.removeAllListeners('download-done');
     };
-  }, [appendTaskLog, updateTask, getTask]);
+  }, [appendTaskLog, updateTask, getTask, scheduleDownloads]);
 
   // 自动调度
   useEffect(() => {
@@ -208,11 +241,13 @@ export function useQueueScheduler(): QueueSchedulerReturn {
 
   // 队列控制
   const startQueue = useCallback(() => {
+    queuePausedRef.current = false;  // 立即设置 ref
     setQueuePaused(false);
     scheduleDownloads();
   }, [scheduleDownloads]);
 
   const pauseQueue = useCallback(() => {
+    queuePausedRef.current = true;  // 立即设置 ref，防止调度延迟
     setQueuePaused(true);
   }, []);
 

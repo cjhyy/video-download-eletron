@@ -51,10 +51,6 @@ const DownloadPage: React.FC = () => {
         playlistSearch={logic.playlistSearch}
         playlistSelected={logic.playlistSelected}
         visiblePlaylistEntries={logic.visiblePlaylistEntries}
-        embedSubs={logic.embedSubs}
-        writeSubs={logic.writeSubs}
-        writeAutoSubs={logic.writeAutoSubs}
-        subLangs={logic.subLangs}
         writeThumbnail={logic.writeThumbnail}
         addMetadata={logic.addMetadata}
         onSelectPath={logic.handleSelectPath}
@@ -71,10 +67,6 @@ const DownloadPage: React.FC = () => {
         onSelectAllEntries={logic.handleSelectAllPlaylistEntries}
         onDeselectAllEntries={logic.handleDeselectAllPlaylistEntries}
         onToggleEntry={logic.handleTogglePlaylistEntry}
-        onEmbedSubsChange={logic.setEmbedSubs}
-        onWriteSubsChange={logic.setWriteSubs}
-        onWriteAutoSubsChange={logic.setWriteAutoSubs}
-        onSubLangsChange={logic.setSubLangs}
         onWriteThumbnailChange={logic.setWriteThumbnail}
         onAddMetadataChange={logic.setAddMetadata}
       />

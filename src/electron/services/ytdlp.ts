@@ -146,14 +146,54 @@ function buildDownloadFailureMessage(stderrTail: string[], exitCode: number | nu
   return { code: 'INTERNAL_ERROR', message: `下载失败（exitCode=${exitCode ?? 'null'}）。请查看任务日志中的 stderrTail。` };
 }
 
+// 获取二进制文件版本号
+function getBinaryVersion(binaryPath: string, versionArg: string = '--version'): string | undefined {
+  try {
+    if (!fs.existsSync(binaryPath)) return undefined;
+
+    const { execFileSync } = require('child_process');
+    const output = execFileSync(binaryPath, [versionArg], {
+      encoding: 'utf8',
+      timeout: 5000,
+      windowsHide: true,
+    }).trim();
+
+    // yt-dlp 输出格式: "2024.01.01" 或 "2024.01.01.post1"
+    // ffmpeg 输出格式: "ffmpeg version 6.1 ..." 或 "ffmpeg version N-xxxxx-..."
+    if (output.includes('ffmpeg version')) {
+      const match = output.match(/ffmpeg version (\S+)/);
+      return match ? match[1] : output.split('\n')[0];
+    }
+
+    // yt-dlp 直接返回版本号
+    return output.split('\n')[0];
+  } catch (error) {
+    console.error(`获取版本号失败: ${binaryPath}`, error);
+    return undefined;
+  }
+}
+
 export function checkBinaries(): BinaryStatus {
   const ytDlpPath = getBinaryPath('yt-dlp');
   const ffmpegPath = getBinaryPath('ffmpeg');
 
+  const ytDlpExists = fs.existsSync(ytDlpPath);
+  const ffmpegExists = fs.existsSync(ffmpegPath);
+
+  // 获取版本号
+  const versions: { ytDlp?: string; ffmpeg?: string } = {};
+  if (ytDlpExists) {
+    versions.ytDlp = getBinaryVersion(ytDlpPath, '--version');
+  }
+  if (ffmpegExists) {
+    versions.ffmpeg = getBinaryVersion(ffmpegPath, '-version');
+  }
+
   return {
-    ytDlp: fs.existsSync(ytDlpPath),
-    ffmpeg: fs.existsSync(ffmpegPath),
+    ytDlp: ytDlpExists,
+    ffmpeg: ffmpegExists,
     paths: { ytDlp: ytDlpPath, ffmpeg: ffmpegPath },
+    versions,
   };
 }
 

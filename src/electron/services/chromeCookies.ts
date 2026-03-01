@@ -291,13 +291,28 @@ function getMacOSDecryptionKey(browser: SupportedBrowser): Buffer | null {
 
 function decryptMacOSCookie(encryptedValue: Buffer, key: Buffer): string {
   try {
+    // 检查是否为空或太短
+    if (!encryptedValue || encryptedValue.length < 4) {
+      // 可能是未加密的值
+      const rawValue = encryptedValue.toString('utf8');
+      // 检查是否为可打印 ASCII 字符串
+      if (/^[\x20-\x7E]*$/.test(rawValue)) {
+        return rawValue;
+      }
+      return '';
+    }
+
     // macOS Chrome 使用 v10 前缀 + AES-128-CBC
     const prefix = encryptedValue.slice(0, 3).toString();
 
-    if (prefix === 'v10') {
-      // v10: 3字节前缀 + 16字节 IV (全 0x20) + 密文
+    if (prefix === 'v10' || prefix === 'v11') {
+      // v10/v11: 3字节前缀 + 密文（使用固定 IV）
       const iv = Buffer.alloc(16, 0x20); // ' ' (space)
       const ciphertext = encryptedValue.slice(3);
+
+      if (ciphertext.length === 0) {
+        return '';
+      }
 
       const decipher = crypto.createDecipheriv('aes-128-cbc', key, iv);
       decipher.setAutoPadding(true);
@@ -306,7 +321,16 @@ function decryptMacOSCookie(encryptedValue: Buffer, key: Buffer): string {
       return decrypted.toString('utf8');
     }
 
-    return encryptedValue.toString('utf8');
+    // 未知前缀 - 检查是否为未加密的纯文本
+    const rawValue = encryptedValue.toString('utf8');
+    // 只接受可打印 ASCII 字符串
+    if (/^[\x20-\x7E]*$/.test(rawValue)) {
+      return rawValue;
+    }
+
+    // 无法识别的加密格式
+    console.warn('[ChromeCookies] 未知的加密前缀:', prefix, '跳过此 cookie');
+    return '';
   } catch (error) {
     console.error('[ChromeCookies] 解密 macOS Cookie 失败:', error);
     return '';
@@ -384,18 +408,17 @@ function decryptLinuxCookie(encryptedValue: Buffer, key: Buffer): string {
 // ============================================================================
 
 async function readCookiesFromDatabase(dbPath: string, domain?: string): Promise<RawCookie[]> {
-  // 动态导入 sql.js（纯 JS 实现的 SQLite）
-  // 注意：需要先安装 sql.js: npm install sql.js
+  // 使用系统 sqlite3 命令行工具读取 cookie 数据库
+  // 注意：BLOB 数据需要用 hex() 函数转换，否则 JSON 输出会损坏二进制数据
   try {
-    // 使用 Electron 内置的 sqlite3 或者读取文件后用 better-sqlite3
-    // 这里使用简单的方案：调用系统 sqlite3 命令行工具
+    // 使用 hex() 包装 encrypted_value 以正确获取二进制数据
     const query = domain
-      ? `SELECT host_key, name, encrypted_value, path, expires_utc, is_secure, is_httponly FROM cookies WHERE host_key LIKE '%${domain}%'`
-      : `SELECT host_key, name, encrypted_value, path, expires_utc, is_secure, is_httponly FROM cookies`;
+      ? `SELECT host_key, name, hex(encrypted_value) as encrypted_value_hex, path, expires_utc, is_secure, is_httponly FROM cookies WHERE host_key LIKE '%${domain}%'`
+      : `SELECT host_key, name, hex(encrypted_value) as encrypted_value_hex, path, expires_utc, is_secure, is_httponly FROM cookies`;
 
-    // 尝试使用系统 sqlite3
+    // 尝试使用系统 sqlite3 的 JSON 输出模式
     const result = spawnSync('sqlite3', ['-json', dbPath, query], {
-      encoding: 'buffer',
+      encoding: 'utf8',
       maxBuffer: 50 * 1024 * 1024, // 50MB
     });
 
@@ -405,25 +428,26 @@ async function readCookiesFromDatabase(dbPath: string, domain?: string): Promise
 
     if (result.status !== 0) {
       // sqlite3 -json 不可用，尝试使用其他方式
-      throw new Error('sqlite3 返回错误');
+      throw new Error('sqlite3 返回错误: ' + result.stderr);
     }
 
-    const jsonStr = result.stdout.toString('utf8');
+    const jsonStr = result.stdout;
     if (!jsonStr.trim()) return [];
 
     const rows = JSON.parse(jsonStr);
     return rows.map((row: Record<string, unknown>) => ({
       host_key: row.host_key as string,
       name: row.name as string,
-      encrypted_value: Buffer.from(row.encrypted_value as string, 'base64'),
+      // 从 hex 字符串转换为 Buffer
+      encrypted_value: Buffer.from(row.encrypted_value_hex as string, 'hex'),
       path: row.path as string,
       expires_utc: row.expires_utc as number,
       is_secure: row.is_secure as number,
       is_httponly: row.is_httponly as number,
     }));
-  } catch {
-    // 降级方案：使用 Node.js 读取二进制文件（需要 better-sqlite3 或 sql.js）
-    console.warn('[ChromeCookies] sqlite3 CLI 不可用，尝试使用备用方案');
+  } catch (error) {
+    // 降级方案：使用分隔符模式
+    console.warn('[ChromeCookies] sqlite3 -json 模式失败，尝试使用备用方案:', error);
     return readCookiesWithBuiltinSqlite(dbPath, domain);
   }
 }

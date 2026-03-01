@@ -52,10 +52,6 @@ interface DownloadOptionsSectionProps {
   visiblePlaylistEntries: { e: PlaylistEntry; i: number }[];
 
   // 后处理相关
-  embedSubs: boolean;
-  writeSubs: boolean;
-  writeAutoSubs: boolean;
-  subLangs: string;
   writeThumbnail: boolean;
   addMetadata: boolean;
 
@@ -78,10 +74,6 @@ interface DownloadOptionsSectionProps {
   onToggleEntry: (idx: number, checked: boolean) => void;
 
   // 后处理事件
-  onEmbedSubsChange: (checked: boolean) => void;
-  onWriteSubsChange: (checked: boolean) => void;
-  onWriteAutoSubsChange: (checked: boolean) => void;
-  onSubLangsChange: (value: string) => void;
   onWriteThumbnailChange: (checked: boolean) => void;
   onAddMetadataChange: (checked: boolean) => void;
 }
@@ -104,10 +96,6 @@ export const DownloadOptionsSection: React.FC<DownloadOptionsSectionProps> = ({
   playlistSearch,
   playlistSelected,
   visiblePlaylistEntries,
-  embedSubs,
-  writeSubs,
-  writeAutoSubs,
-  subLangs,
   writeThumbnail,
   addMetadata,
   onSelectPath,
@@ -124,10 +112,6 @@ export const DownloadOptionsSection: React.FC<DownloadOptionsSectionProps> = ({
   onSelectAllEntries,
   onDeselectAllEntries,
   onToggleEntry,
-  onEmbedSubsChange,
-  onWriteSubsChange,
-  onWriteAutoSubsChange,
-  onSubLangsChange,
   onWriteThumbnailChange,
   onAddMetadataChange,
 }) => {
@@ -273,17 +257,8 @@ export const DownloadOptionsSection: React.FC<DownloadOptionsSectionProps> = ({
         {/* 后处理选项 */}
         <PostProcessingSection
           loading={loading}
-          audioOnly={audioOnly}
-          embedSubs={embedSubs}
-          writeSubs={writeSubs}
-          writeAutoSubs={writeAutoSubs}
-          subLangs={subLangs}
           writeThumbnail={writeThumbnail}
           addMetadata={addMetadata}
-          onEmbedSubsChange={onEmbedSubsChange}
-          onWriteSubsChange={onWriteSubsChange}
-          onWriteAutoSubsChange={onWriteAutoSubsChange}
-          onSubLangsChange={onSubLangsChange}
           onWriteThumbnailChange={onWriteThumbnailChange}
           onAddMetadataChange={onAddMetadataChange}
         />

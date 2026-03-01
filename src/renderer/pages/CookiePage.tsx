@@ -44,7 +44,13 @@ const CookiePage: React.FC<CookiePageProps> = ({ isEmbedded }) => {
   const [cookieEnabled, setCookieEnabled] = useState(false);
   const [cookieFile, setCookieFile] = useState('');
   const [cookieExporting, setCookieExporting] = useState(false);
-  const [cookieMethod, setCookieMethod] = useState<'file' | 'login'>('login');
+  const [cookieMethod, setCookieMethod] = useState<'auto' | 'login' | 'file'>('auto');
+
+  // 浏览器自动提取相关
+  const [installedBrowsers, setInstalledBrowsers] = useState<string[]>([]);
+  const [selectedBrowser, setSelectedBrowser] = useState<string>('chrome');
+  const [extractDomain, setExtractDomain] = useState<string>('');
+  const [extracting, setExtracting] = useState(false);
   const [loginUrl, setLoginUrl] = useState('https://www.youtube.com');
   const [presetSite, setPresetSite] = useState<'youtube' | 'bilibili' | 'tiktok'>('youtube');
 
@@ -62,7 +68,7 @@ const CookiePage: React.FC<CookiePageProps> = ({ isEmbedded }) => {
   const [createProfileName, setCreateProfileName] = useState('');
   const [createProfileDomain, setCreateProfileDomain] = useState('');
   const [pendingCookieFile, setPendingCookieFile] = useState<string>('');
-  const [createProfileMethod, setCreateProfileMethod] = useState<'manual' | 'login'>('manual');
+  const [createProfileMethod, setCreateProfileMethod] = useState<'manual' | 'login' | 'auto'>('manual');
   
   // 拖放状态
   const [isDragging, setIsDragging] = useState(false);
@@ -74,6 +80,21 @@ const CookiePage: React.FC<CookiePageProps> = ({ isEmbedded }) => {
     setCookieProfiles(config.cookieProfiles || []);
     setActiveCookieProfileId(config.activeCookieProfileId || null);
   }, [config.cookieEnabled, config.cookieFile, config.cookieProfiles, config.activeCookieProfileId]);
+
+  // 检测已安装的浏览器
+  useEffect(() => {
+    (async () => {
+      try {
+        const browsers = await window.electronAPI.detectInstalledBrowsers();
+        setInstalledBrowsers(browsers);
+        if (browsers.length > 0 && !browsers.includes(selectedBrowser)) {
+          setSelectedBrowser(browsers[0]);
+        }
+      } catch (e) {
+        console.warn('检测浏览器失败:', e);
+      }
+    })();
+  }, []);
 
   // 删除Cookie配置
   const handleDeleteProfile = async (profileId: string) => {
@@ -172,6 +193,67 @@ const CookiePage: React.FC<CookiePageProps> = ({ isEmbedded }) => {
     setCreateProfileName('');
     setCreateProfileDomain('');
     setCreateProfileDialogOpen(true);
+  };
+
+  // 自动提取浏览器 Cookie（直接执行，不需要先填域名）
+  const handleExtractBrowserCookies = async () => {
+    if (!selectedBrowser) {
+      toast.error('请选择浏览器');
+      return;
+    }
+
+    setExtracting(true);
+    try {
+      const result = await window.electronAPI.extractBrowserCookies(
+        selectedBrowser as any,
+        extractDomain || undefined
+      );
+
+      if (result.success) {
+        // 自动生成配置名称和域名
+        const browserName = selectedBrowser.charAt(0).toUpperCase() + selectedBrowser.slice(1);
+        const domainLabel = extractDomain || '全部站点';
+        const autoName = extractDomain
+          ? `${browserName} - ${extractDomain}`
+          : `${browserName} Cookie`;
+
+        // 创建新的 Cookie 配置
+        const newProfile: CookieProfile = {
+          id: Date.now().toString(),
+          name: autoName,
+          domain: extractDomain || 'all',
+          cookieFile: result.cookieFile,
+          createdAt: new Date().toISOString(),
+        };
+
+        const newProfiles = [...cookieProfiles, newProfile];
+        setCookieProfiles(newProfiles);
+        setActiveCookieProfileId(newProfile.id);
+        setCookieEnabled(true);
+        setCookieFile(result.cookieFile);
+
+        updateConfig({
+          ...config,
+          cookieEnabled: true,
+          cookieFile: result.cookieFile,
+          cookieProfiles: newProfiles,
+          activeCookieProfileId: newProfile.id,
+        });
+
+        toast.success(`成功提取 ${result.cookieCount} 条 Cookie！`, {
+          description: `配置: ${autoName}（${domainLabel}）`
+        });
+
+        // 清空域名输入
+        setExtractDomain('');
+      } else if ('error' in result) {
+        toast.error(`提取失败: ${result.error}`);
+      }
+    } catch (error: any) {
+      toast.error(`提取失败: ${error.message}`);
+    } finally {
+      setExtracting(false);
+    }
   };
 
   const handleLoginAndGetCookies = async () => {
@@ -526,26 +608,113 @@ const CookiePage: React.FC<CookiePageProps> = ({ isEmbedded }) => {
             <CardDescription>选择一种方式获取 Cookie 并创建配置</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            <div className="flex gap-2 p-1 bg-muted rounded-lg">
+            <div className="flex gap-1 p-1 bg-muted rounded-lg">
+              <Button
+                variant={cookieMethod === 'auto' ? 'secondary' : 'ghost'}
+                className={`flex-1 text-xs sm:text-sm ${cookieMethod === 'auto' ? 'bg-background shadow-sm' : ''}`}
+                onClick={() => setCookieMethod('auto')}
+              >
+                <CookieIcon className="h-4 w-4 mr-1 sm:mr-2" />
+                <span className="hidden sm:inline">自动提取</span>
+                <span className="sm:hidden">自动</span>
+              </Button>
               <Button
                 variant={cookieMethod === 'login' ? 'secondary' : 'ghost'}
-                className={`flex-1 ${cookieMethod === 'login' ? 'bg-background shadow-sm' : ''}`}
+                className={`flex-1 text-xs sm:text-sm ${cookieMethod === 'login' ? 'bg-background shadow-sm' : ''}`}
                 onClick={() => setCookieMethod('login')}
               >
-                <GlobeIcon className="h-4 w-4 mr-2" />
-                浏览器登录 (推荐)
+                <GlobeIcon className="h-4 w-4 mr-1 sm:mr-2" />
+                <span className="hidden sm:inline">浏览器登录</span>
+                <span className="sm:hidden">登录</span>
               </Button>
               <Button
                 variant={cookieMethod === 'file' ? 'secondary' : 'ghost'}
-                className={`flex-1 ${cookieMethod === 'file' ? 'bg-background shadow-sm' : ''}`}
+                className={`flex-1 text-xs sm:text-sm ${cookieMethod === 'file' ? 'bg-background shadow-sm' : ''}`}
                 onClick={() => setCookieMethod('file')}
               >
-                <UploadFileIcon className="h-4 w-4 mr-2" />
-                手动上传文件
+                <UploadFileIcon className="h-4 w-4 mr-1 sm:mr-2" />
+                <span className="hidden sm:inline">手动上传</span>
+                <span className="sm:hidden">上传</span>
               </Button>
             </div>
 
-            {cookieMethod === 'login' ? (
+            {cookieMethod === 'auto' ? (
+              <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                <Alert className="bg-green-50/50 border-green-200 dark:bg-green-900/10 dark:border-green-900/20">
+                  <CookieIcon className="h-4 w-4 text-green-600" />
+                  <AlertTitle className="font-semibold text-green-800 dark:text-green-400">最简单的方式</AlertTitle>
+                  <AlertDescription className="text-sm text-green-700 dark:text-green-500/80">
+                    直接从已登录的浏览器中提取 Cookie，无需重新登录。需要先关闭浏览器。
+                  </AlertDescription>
+                </Alert>
+
+                <div className="space-y-2">
+                  <Label>选择浏览器</Label>
+                  {installedBrowsers.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {installedBrowsers.map((browser) => (
+                        <Button
+                          key={browser}
+                          type="button"
+                          variant={selectedBrowser === browser ? 'secondary' : 'outline'}
+                          onClick={() => setSelectedBrowser(browser)}
+                          className="capitalize"
+                        >
+                          {browser === 'chrome' ? 'Chrome' :
+                           browser === 'edge' ? 'Edge' :
+                           browser === 'chromium' ? 'Chromium' :
+                           browser === 'brave' ? 'Brave' :
+                           browser === 'opera' ? 'Opera' :
+                           browser === 'vivaldi' ? 'Vivaldi' : browser}
+                        </Button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">未检测到支持的浏览器</p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="extract-domain">过滤域名（可选）</Label>
+                  <Input
+                    id="extract-domain"
+                    placeholder="例如: youtube.com（留空提取全部）"
+                    value={extractDomain}
+                    onChange={(e) => setExtractDomain(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">指定域名只提取该网站的 Cookie，留空则提取全部</p>
+                </div>
+
+                <div className="p-4 rounded-lg bg-muted/50 border text-sm space-y-2">
+                  <p className="font-semibold">使用说明:</p>
+                  <ol className="list-decimal list-inside space-y-1 text-muted-foreground">
+                    <li><strong>关闭</strong>要提取的浏览器（必须）</li>
+                    <li>选择浏览器，可选填写域名过滤</li>
+                    <li>点击提取，自动创建配置</li>
+                  </ol>
+                </div>
+
+                <Button
+                  className="w-full h-12"
+                  onClick={handleExtractBrowserCookies}
+                  disabled={extracting || installedBrowsers.length === 0}
+                >
+                  {extracting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      提取中...
+                    </>
+                  ) : (
+                    <>
+                      <CookieIcon className="mr-2 h-4 w-4" />
+                      {extractDomain
+                        ? `提取 ${extractDomain} 的 Cookie`
+                        : `提取全部 Cookie`}
+                    </>
+                  )}
+                </Button>
+              </div>
+            ) : cookieMethod === 'login' ? (
               <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
                 <Alert className="bg-primary/5 border-primary/20">
                   <PlusIcon className="h-4 w-4 text-primary" />
