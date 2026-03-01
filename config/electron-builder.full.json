@@ -37,12 +37,12 @@
   ],
   "win": {
     "target": "nsis",
-    "icon": "assets/icon.ico",
+    "icon": "assets/favicon/favicon.ico",
     "artifactName": "${productName}-${version}-full-${arch}.${ext}"
   },
   "mac": {
     "target": "dmg",
-    "icon": "assets/icon.icns",
+    "icon": "assets/favicon/icon.icns",
     "artifactName": "${productName}-${version}-full-${arch}.${ext}"
   },
   "linux": {
