@@ -1,6 +1,6 @@
 {
   "name": "video-downloader-app",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "基于Electron和TypeScript的视频下载器，使用yt-dlp和ffmpeg",
   "main": "dist-electron/main.js",
   "scripts": {
