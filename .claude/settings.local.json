@@ -4,7 +4,11 @@
       "Bash(node:*)",
       "Bash(npx tsc:*)",
       "Bash(npm run:*)",
-      "Bash(iconutil:*)"
+      "Bash(iconutil:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git tag:*)",
+      "Bash(git push:*)"
     ]
   }
 }
