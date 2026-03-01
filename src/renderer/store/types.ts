@@ -58,6 +58,7 @@ export interface DownloadTask {
   playlistMode?: 'single' | 'playlist';
   playlistItems?: string;
   playlistEnd?: number;
+  cookieFile?: string;
   postProcess?: {
     embedSubs?: boolean;
     writeSubs?: boolean;
@@ -67,6 +68,8 @@ export interface DownloadTask {
     addMetadata?: boolean;
   };
   error?: string;
+  /** Actual output file path set after download completes. */
+  filePath?: string;
   addedAt: string; // ISO
   completedAt?: string; // ISO
   retryCount: number;

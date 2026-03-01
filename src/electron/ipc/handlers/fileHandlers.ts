@@ -94,4 +94,10 @@ export class FileHandlers {
     const safePath = validateSafeDirPath(folderPath, 'folderPath');
     await shell.openPath(safePath);
   }
+
+  /** 在文件管理器中显示并选中文件 */
+  showItemInFolder(filePath: string): void {
+    const safePath = validateSafeFilePath(filePath, 'filePath');
+    shell.showItemInFolder(safePath);
+  }
 }

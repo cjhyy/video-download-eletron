@@ -27,7 +27,7 @@ interface QueueSchedulerReturn {
 }
 
 export function useQueueScheduler(): QueueSchedulerReturn {
-  const config = useConfigStore((s) => s.config);
+  const maxConcurrentDownloads = useConfigStore((s) => s.config.maxConcurrentDownloads);
   const tasks = useQueueStore((s) => s.tasks);
   const updateTask = useQueueStore((s) => s.updateTask);
   const appendTaskLog = useQueueStore((s) => s.appendTaskLog);
@@ -50,17 +50,21 @@ export function useQueueScheduler(): QueueSchedulerReturn {
     queuePausedRef.current = queuePaused;
   }, [queuePaused]);
 
-  const MAX_CONCURRENT_DOWNLOADS = config.maxConcurrentDownloads || QUEUE_CONFIG.DEFAULT_MAX_CONCURRENT;
+  const MAX_CONCURRENT_DOWNLOADS = maxConcurrentDownloads || QUEUE_CONFIG.DEFAULT_MAX_CONCURRENT;
 
   // 调度下载任务
+  // 注意：直接从 store 读取最新 tasks，避免闭包过期导致重复调度
   const scheduleDownloads = useCallback(() => {
     if (isSchedulingRef.current) return;
-    if (queuePaused) return;
+    if (queuePausedRef.current) return;
 
     const activeIds = activeDownloadIdsRef.current;
     if (activeIds.size >= MAX_CONCURRENT_DOWNLOADS) return;
 
-    const pendingTasks = tasks
+    // 从 store 读取最新状态，避免闭包过期问题
+    const currentTasks = useQueueStore.getState().tasks;
+
+    const pendingTasks = currentTasks
       .slice()
       .filter((t) => t.status === 'pending')
       .sort((a, b) => (b.addedAt || '').localeCompare(a.addedAt || ''));
@@ -70,7 +74,7 @@ export function useQueueScheduler(): QueueSchedulerReturn {
     isSchedulingRef.current = true;
 
     try {
-      while (activeIds.size < MAX_CONCURRENT_DOWNLOADS && pendingTasks.length > 0 && !queuePaused) {
+      while (activeIds.size < MAX_CONCURRENT_DOWNLOADS && pendingTasks.length > 0 && !queuePausedRef.current) {
         const task = pendingTasks.shift();
         if (!task) break;
 
@@ -96,7 +100,7 @@ export function useQueueScheduler(): QueueSchedulerReturn {
             postProcess: task.postProcess,
             useBrowserCookies: false,
             browserPath: 'auto',
-            cookieFile: config.cookieEnabled && config.cookieFile ? config.cookieFile : undefined,
+            cookieFile: task.cookieFile,
           })
           .then(() => {
             updateTask(task.id, {
@@ -122,16 +126,13 @@ export function useQueueScheduler(): QueueSchedulerReturn {
             cancelReasonRef.current.delete(task.id);
             activeIds.delete(task.id);
             setActiveCount(activeIds.size);
-            // 只有队列未暂停时才继续调度（使用 ref 获取最新值）
-            if (!queuePausedRef.current) {
-              setTimeout(() => scheduleDownloads(), QUEUE_CONFIG.SCHEDULE_DELAY_MS);
-            }
+            // 不在这里重新调度，由 onDownloadDone 统一处理，避免闭包过期导致重复调度
           });
       }
     } finally {
       isSchedulingRef.current = false;
     }
-  }, [queuePaused, tasks, updateTask, config.cookieEnabled, config.cookieFile, MAX_CONCURRENT_DOWNLOADS]);
+  }, [updateTask, MAX_CONCURRENT_DOWNLOADS]);
 
   // 监听 IPC 事件
   useEffect(() => {
@@ -195,12 +196,15 @@ export function useQueueScheduler(): QueueSchedulerReturn {
       }
 
       if (payload.success) {
-        updateTask(payload.taskId, {
+        const updates: Partial<DownloadTask> = {
           status: 'completed',
           progress: 100,
           completedAt: new Date(payload.ts || Date.now()).toISOString(),
           error: undefined,
-        });
+        };
+        if (payload.filePath) updates.filePath = payload.filePath;
+        if (payload.fileSize) updates.size = payload.fileSize;
+        updateTask(payload.taskId, updates);
       } else {
         const errMsg = payload?.error?.message || '下载失败';
         const tail = payload?.error?.details?.stderrTail;
@@ -231,13 +235,13 @@ export function useQueueScheduler(): QueueSchedulerReturn {
     };
   }, [appendTaskLog, updateTask, getTask, scheduleDownloads]);
 
-  // 自动调度
+  // 自动调度：当 tasks 变化时检查是否有待处理任务
   useEffect(() => {
     if (queuePaused) return;
     if (tasks.some((t) => t.status === 'pending')) {
       scheduleDownloads();
     }
-  }, [tasks, queuePaused, scheduleDownloads]);
+  }, [tasks, queuePaused]);
 
   // 队列控制
   const startQueue = useCallback(() => {

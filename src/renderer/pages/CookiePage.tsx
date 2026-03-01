@@ -41,7 +41,13 @@ const CookiePage: React.FC<CookiePageProps> = ({ isEmbedded }) => {
   const config = useConfigStore((s) => s.config);
   const updateConfig = useConfigStore((s) => s.updateConfig);
   const confirm = useConfirmStore((s) => s.confirm);
-  const [cookieEnabled, setCookieEnabled] = useState(false);
+
+  // Derive directly from config store to avoid local state duplication & cascading re-renders
+  const cookieEnabled = config.cookieEnabled || false;
+  const cookieProfiles = config.cookieProfiles || [];
+  const activeCookieProfileId = config.activeCookieProfileId || null;
+
+  // Local-only UI state (not mirrored from config)
   const [cookieFile, setCookieFile] = useState('');
   const [cookieExporting, setCookieExporting] = useState(false);
   const [cookieMethod, setCookieMethod] = useState<'auto' | 'login' | 'file'>('auto');
@@ -55,8 +61,6 @@ const CookiePage: React.FC<CookiePageProps> = ({ isEmbedded }) => {
   const [presetSite, setPresetSite] = useState<'youtube' | 'bilibili' | 'tiktok'>('youtube');
 
   // 多Cookie配置相关状态
-  const [cookieProfiles, setCookieProfiles] = useState<CookieProfile[]>([]);
-  const [activeCookieProfileId, setActiveCookieProfileId] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProfile, setEditingProfile] = useState<CookieProfile | null>(null);
   const [profileName, setProfileName] = useState('');
@@ -72,14 +76,6 @@ const CookiePage: React.FC<CookiePageProps> = ({ isEmbedded }) => {
   
   // 拖放状态
   const [isDragging, setIsDragging] = useState(false);
-
-  // 同步全局配置到本地状态
-  useEffect(() => {
-    setCookieEnabled(config.cookieEnabled || false);
-    setCookieFile(config.cookieFile || '');
-    setCookieProfiles(config.cookieProfiles || []);
-    setActiveCookieProfileId(config.activeCookieProfileId || null);
-  }, [config.cookieEnabled, config.cookieFile, config.cookieProfiles, config.activeCookieProfileId]);
 
   // 检测已安装的浏览器
   useEffect(() => {
@@ -107,14 +103,9 @@ const CookiePage: React.FC<CookiePageProps> = ({ isEmbedded }) => {
 
     if (isConfirmed) {
       const newProfiles = cookieProfiles.filter(p => p.id !== profileId);
-      setCookieProfiles(newProfiles);
-
-      // 如果删除的是当前激活的配置，取消激活
       const newActiveId = activeCookieProfileId === profileId ? null : activeCookieProfileId;
-      setActiveCookieProfileId(newActiveId);
 
       updateConfig({
-        ...config,
         cookieProfiles: newProfiles,
         activeCookieProfileId: newActiveId,
         cookieEnabled: newActiveId !== null,
@@ -126,14 +117,9 @@ const CookiePage: React.FC<CookiePageProps> = ({ isEmbedded }) => {
 
   // 切换激活的Cookie配置
   const handleSelectProfile = (profileId: string) => {
-    setActiveCookieProfileId(profileId);
     const profile = cookieProfiles.find(p => p.id === profileId);
-
     if (profile) {
-      setCookieEnabled(true);
-      setCookieFile(profile.cookieFile);
       updateConfig({
-        ...config,
         activeCookieProfileId: profileId,
         cookieEnabled: true,
         cookieFile: profile.cookieFile,
@@ -166,12 +152,7 @@ const CookiePage: React.FC<CookiePageProps> = ({ isEmbedded }) => {
           : p
       );
 
-      setCookieProfiles(newProfiles);
-      updateConfig({
-        ...config,
-        cookieProfiles: newProfiles,
-      });
-
+      updateConfig({ cookieProfiles: newProfiles });
       setDialogOpen(false);
       setEditingProfile(null);
       setProfileName('');
@@ -227,13 +208,7 @@ const CookiePage: React.FC<CookiePageProps> = ({ isEmbedded }) => {
         };
 
         const newProfiles = [...cookieProfiles, newProfile];
-        setCookieProfiles(newProfiles);
-        setActiveCookieProfileId(newProfile.id);
-        setCookieEnabled(true);
-        setCookieFile(result.cookieFile);
-
         updateConfig({
-          ...config,
           cookieEnabled: true,
           cookieFile: result.cookieFile,
           cookieProfiles: newProfiles,
@@ -359,12 +334,7 @@ const CookiePage: React.FC<CookiePageProps> = ({ isEmbedded }) => {
           };
 
           const newProfiles = [...cookieProfiles, newProfile];
-          setCookieProfiles(newProfiles);
-          setActiveCookieProfileId(newProfile.id);
-          setCookieEnabled(true);
-
           updateConfig({
-            ...config,
             cookieEnabled: true,
             cookieFile: result.cookieFile,
             cookieProfiles: newProfiles,
@@ -413,14 +383,7 @@ const CookiePage: React.FC<CookiePageProps> = ({ isEmbedded }) => {
           };
 
           const newProfiles = [...cookieProfiles, newProfile];
-          setCookieProfiles(newProfiles);
-          setActiveCookieProfileId(newProfile.id);
-          setCookieEnabled(true);
-          setCookieFile(result.cookieFile);
-
-          // 保存到全局状态
           updateConfig({
-            ...config,
             cookieEnabled: true,
             cookieFile: result.cookieFile,
             cookieProfiles: newProfiles,
@@ -475,11 +438,8 @@ const CookiePage: React.FC<CookiePageProps> = ({ isEmbedded }) => {
                   checked={cookieEnabled}
                   onCheckedChange={(checked) => {
                     const enabled = !!checked;
-                    setCookieEnabled(enabled);
                     if (!enabled) {
-                      setActiveCookieProfileId(null);
                       updateConfig({
-                        ...config,
                         cookieEnabled: false,
                         cookieFile: '',
                         activeCookieProfileId: null,

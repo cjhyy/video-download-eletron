@@ -41,7 +41,7 @@ function getBinariesDir(): string {
 
   // 开发模式：项目根目录下的 binaries
   if (process.env.NODE_ENV === 'development' || process.argv.includes('--dev')) {
-    return path.join(__dirname, '..', '..', '..', 'binaries', platform);
+    return path.join(__dirname, '..', 'binaries', platform);
   }
 
   // 生产模式：用户数据目录（精简版）
@@ -226,7 +226,7 @@ export async function downloadBinary(
     console.log(`[binaryDownloader] Downloading ${binaryName} from ${url}`);
     console.log(`[binaryDownloader] Save to: ${outputPath}`);
 
-    await downloadFile(downloadPath, downloadPath, (progress) => {
+    await downloadFile(url, downloadPath, (progress) => {
       onProgress?.({
         binary: binaryName,
         ...progress,

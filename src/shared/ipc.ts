@@ -16,6 +16,7 @@ export const IPCChannels = {
   DOWNLOAD_VIDEO: 'download-video',
   CANCEL_DOWNLOAD: 'cancel-download',
   OPEN_FOLDER: 'open-folder',
+  SHOW_ITEM_IN_FOLDER: 'show-item-in-folder',
   CHECK_BINARIES: 'check-binaries',
   UPDATE_YT_DLP: 'update-yt-dlp',
   DOWNLOAD_PROGRESS: 'download-progress',

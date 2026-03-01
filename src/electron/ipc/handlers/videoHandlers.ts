@@ -66,7 +66,7 @@ export class VideoHandlers {
       onError: (error: string) => void;
       onLog?: (level: string, message: string) => void;
     }
-  ): Promise<{ success: boolean }> {
+  ): Promise<{ success: boolean; filePath?: string; fileSize?: string }> {
     const validated = validateDownloadOptions(options);
     return ytdlpDownloadVideo(validated, callbacks);
   }

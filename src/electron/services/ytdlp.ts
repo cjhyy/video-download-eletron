@@ -19,6 +19,44 @@ import { IpcError } from '../ipc/ipcError';
 // Track active yt-dlp child processes so we can cancel per taskId (required for concurrent downloads).
 const activeDownloads = new Map<string, ChildProcess>();
 
+/**
+ * Validate that a cookie file is in Netscape HTTP Cookie File format.
+ * Returns false if the file is missing, empty, or doesn't look like a valid cookie file.
+ */
+/**
+ * Format bytes into a human-readable size string.
+ */
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MiB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GiB`;
+}
+
+function isValidNetscapeCookieFile(filePath: string): boolean {
+  try {
+    const content = fs.readFileSync(filePath, 'utf8');
+    if (!content.trim()) return false;
+
+    const lines = content.split(/\r?\n/);
+    // Check for the standard Netscape header
+    if (lines.some((line) => line.includes('# Netscape HTTP Cookie File'))) {
+      return true;
+    }
+    // Fallback: check if at least one line looks like a tab-separated cookie entry
+    // Format: domain \t flag \t path \t secure \t expiration \t name \t value
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const parts = trimmed.split('\t');
+      if (parts.length >= 7) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export type CancelDownloadResult = { success: true } | { success: false; error: string };
 
 function killProcessTree(child: ChildProcess): void {
@@ -247,9 +285,11 @@ export async function getVideoInfo(params: {
       console.log(`[${new Date().toLocaleTimeString()}] 使用代理: ${config.network.proxy}`);
     }
 
-    if (cookieFile && fs.existsSync(cookieFile)) {
+    if (cookieFile && fs.existsSync(cookieFile) && isValidNetscapeCookieFile(cookieFile)) {
       args.push('--cookies', cookieFile);
       console.log(`[${new Date().toLocaleTimeString()}] 使用Cookie文件: ${cookieFile}`);
+    } else if (cookieFile) {
+      console.warn(`[${new Date().toLocaleTimeString()}] Cookie 文件格式无效，已跳过: ${cookieFile}`);
     } else if (useBrowserCookies && browserPath) {
       args.push('--cookies-from-browser', 'chrome');
       console.log(`[${new Date().toLocaleTimeString()}] 从Chrome浏览器读取Cookie (使用默认配置)`);
@@ -391,7 +431,7 @@ export async function downloadVideo(
     onError: (error: string) => void;
     onLog?: (level: DownloadLogLevel, message: string) => void;
   }
-): Promise<{ success: boolean }> {
+): Promise<{ success: boolean; filePath?: string; fileSize?: string }> {
   return new Promise((resolve, reject) => {
     const { taskId, url, outputPath, format, audioOnly, rateLimit, useBrowserCookies, browserPath, cookieFile } =
       options;
@@ -461,9 +501,12 @@ export async function downloadVideo(
       }
     }
 
-    if (cookieFile && fs.existsSync(cookieFile)) {
+    if (cookieFile && fs.existsSync(cookieFile) && isValidNetscapeCookieFile(cookieFile)) {
       args.push('--cookies', cookieFile);
       console.log(`[${new Date().toLocaleTimeString()}] 使用Cookie文件: ${cookieFile}`);
+    } else if (cookieFile) {
+      console.warn(`[${new Date().toLocaleTimeString()}] Cookie 文件格式无效，已跳过: ${cookieFile}`);
+      callbacks.onLog?.('warn', `Cookie 文件格式无效，已跳过: ${cookieFile}`);
     } else if (useBrowserCookies && browserPath) {
       args.push('--cookies-from-browser', 'chrome');
       console.log(`[${new Date().toLocaleTimeString()}] 从Chrome浏览器读取Cookie (使用默认配置)`);
@@ -516,6 +559,7 @@ export async function downloadVideo(
     callbacks.onLog?.('info', `url: ${sanitizedUrl}`);
     callbacks.onLog?.('info', `args: ${args.join(' ')}`);
     let lastProgress: { percent?: number } = {};
+    let lastFilePath: string | undefined;
     const stderrTail: string[] = [];
     const hints = {
       shown403: false,
@@ -530,7 +574,15 @@ export async function downloadVideo(
       const lines = output.split(/\r?\n/).filter(Boolean);
       for (const line of lines) {
         // Skip pure progress lines to reduce log volume (we already report percent separately)
-        if (line.startsWith('[download]')) continue;
+        if (line.startsWith('[download]')) {
+          // Capture destination file path: [download] Destination: /path/to/file.mp4
+          const destMatch = line.match(/\[download\] Destination:\s+(.+)/);
+          if (destMatch) lastFilePath = destMatch[1].trim();
+          continue;
+        }
+        // Capture merged file path: [Merger] Merging formats into "/path/to/file.mp4"
+        const mergerMatch = line.match(/\[Merger\] Merging formats into "(.+)"/);
+        if (mergerMatch) lastFilePath = mergerMatch[1];
         callbacks.onLog?.('info', line);
       }
 
@@ -610,9 +662,19 @@ export async function downloadVideo(
       if (taskId) activeDownloads.delete(taskId);
       callbacks.onLog?.('info', `yt-dlp exited with code ${code ?? 'null'}`);
       if (code === 0) {
-        resolve({ success: true });
+        // Resolve with actual file path and size when available
+        let filePath: string | undefined = lastFilePath;
+        let fileSize: string | undefined;
+        if (filePath) {
+          try {
+            const stat = fs.statSync(filePath);
+            fileSize = formatFileSize(stat.size);
+          } catch {
+            // file may have been post-processed to a different path
+          }
+        }
+        resolve({ success: true, filePath, fileSize });
       } else {
-        const tail = stderrTail.join('\n');
         const mapped = buildDownloadFailureMessage(stderrTail, code);
         reject(new IpcError(mapped.code, mapped.message, { exitCode: code, stderrTail }));
       }
@@ -797,8 +859,10 @@ export async function getPlaylistInfo(params: {
       args.push('--proxy', config.network.proxy);
     }
 
-    if (cookieFile && fs.existsSync(cookieFile)) {
+    if (cookieFile && fs.existsSync(cookieFile) && isValidNetscapeCookieFile(cookieFile)) {
       args.push('--cookies', cookieFile);
+    } else if (cookieFile) {
+      console.warn(`[${new Date().toLocaleTimeString()}] Cookie 文件格式无效，已跳过: ${cookieFile}`);
     } else if (useBrowserCookies && browserPath) {
       args.push('--cookies-from-browser', 'chrome');
     }

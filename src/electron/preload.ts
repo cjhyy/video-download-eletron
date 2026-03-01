@@ -57,8 +57,12 @@ const electronAPI: ElectronAPI = {
   cancelDownload: (taskId: string) => ipcRenderer.invoke(IPCChannels.CANCEL_DOWNLOAD, taskId),
   
   // 打开文件夹
-  openFolder: (folderPath: string): Promise<void> => 
+  openFolder: (folderPath: string): Promise<void> =>
     ipcRenderer.invoke(IPCChannels.OPEN_FOLDER, folderPath),
+
+  // 在文件管理器中显示文件
+  showItemInFolder: (filePath: string): Promise<void> =>
+    ipcRenderer.invoke(IPCChannels.SHOW_ITEM_IN_FOLDER, filePath),
   
   // 检查二进制文件
   checkBinaries: (): Promise<BinaryStatus> => 

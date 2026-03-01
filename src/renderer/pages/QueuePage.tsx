@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { CheckCircle2, CircleAlert, Loader2, Pause, Play, RefreshCcw, Trash2 } from 'lucide-react';
+import { CheckCircle2, CircleAlert, Cookie, FolderOpen, Loader2, Music, Pause, Play, RefreshCcw, Trash2, Video } from 'lucide-react';
 import { useConfigStore } from '@renderer/store/configStore';
 import { useQueueStore } from '@renderer/store/queueStore';
 import { useQueueScheduler } from '@renderer/hooks/useQueueScheduler';
@@ -167,6 +167,32 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, onPause, onResume, onRemove, 
           <div className="min-w-0 space-y-1">
             <div className="truncate font-medium">{task.title}</div>
             <div className="truncate text-xs text-muted-foreground">{task.url}</div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {task.cookieFile ? (
+                <Badge variant="outline" className="gap-1 text-[10px] px-1.5 py-0 h-5 font-normal text-muted-foreground">
+                  <Cookie className="h-3 w-3" />
+                  {task.cookieFile.replace(/^.*[\\/]/, '')}
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 font-normal text-muted-foreground">
+                  无 Cookie
+                </Badge>
+              )}
+              <Badge variant="outline" className="gap-1 text-[10px] px-1.5 py-0 h-5 font-normal text-muted-foreground">
+                {task.audioOnly ? (
+                  <><Music className="h-3 w-3" />仅音频 MP3</>
+                ) : task.format ? (
+                  <><Video className="h-3 w-3" />{task.format}</>
+                ) : (
+                  '默认格式'
+                )}
+              </Badge>
+              {task.playlistMode === 'playlist' && (
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 font-normal text-muted-foreground">
+                  列表模式
+                </Badge>
+              )}
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -278,9 +304,23 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, onPause, onResume, onRemove, 
           </Alert>
         )}
 
-        {task.status === 'completed' && task.completedAt && (
-          <div className="text-xs text-muted-foreground">
-            完成于：{new Date(task.completedAt).toLocaleString()}
+        {task.status === 'completed' && (
+          <div className="flex items-center justify-between">
+            <div className="text-xs text-muted-foreground">
+              {task.completedAt && <>完成于：{new Date(task.completedAt).toLocaleString()}</>}
+              {task.size && <> · {task.size}</>}
+            </div>
+            {task.filePath && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 h-7 text-xs"
+                onClick={() => window.electronAPI.showItemInFolder(task.filePath!)}
+              >
+                <FolderOpen className="h-3.5 w-3.5" />
+                打开文件
+              </Button>
+            )}
           </div>
         )}
 

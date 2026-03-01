@@ -43,6 +43,10 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     return fileHandlers.openFolder(folderPath as string);
   });
 
+  ipcRegistry.register(IPCChannels.SHOW_ITEM_IN_FOLDER, async (_event, filePath) => {
+    return fileHandlers.showItemInFolder(filePath as string);
+  });
+
   // ==================== 视频操作 ====================
 
   ipcRegistry.register(IPCChannels.GET_VIDEO_INFO, async (_event, url, useBrowserCookies, browserPath, cookieFile) => {
@@ -81,6 +85,8 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
         success: true,
         ts: new Date().toISOString(),
         startedAt,
+        filePath: result.filePath,
+        fileSize: result.fileSize,
       });
       return result;
     } catch (err: unknown) {

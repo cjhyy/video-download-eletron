@@ -280,6 +280,7 @@ export function useDownloadLogic() {
         outputPath: downloadPath,
         format: formatToUse,
         audioOnly,
+        cookieFile: getCookieFile(),
         playlistMode: 'single',
         postProcess: { embedSubs, writeSubs, writeAutoSubs, subLangs, writeThumbnail, addMetadata },
       });
@@ -342,6 +343,7 @@ export function useDownloadLogic() {
       outputPath: downloadPath,
       format: formatToUse,
       audioOnly,
+      cookieFile: getCookieFile(),
       playlistMode,
       playlistItems: playlistMode === 'playlist' ? playlistItems.trim() || undefined : undefined,
       playlistEnd: playlistMode === 'playlist' ? playlistEnd : undefined,

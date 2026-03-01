@@ -137,6 +137,10 @@ export interface DownloadDoneEvent {
   error?: { code?: string; message: string; details?: unknown };
   startedAt?: string;
   ts: string; // ISO time
+  /** Actual output file path (available on success). */
+  filePath?: string;
+  /** Human-readable file size (available on success). */
+  fileSize?: string;
 }
 
 export type CancelDownloadResult = { success: true } | { success: false; error: string };
@@ -240,6 +244,7 @@ export interface ElectronAPI {
   downloadVideo: (options: DownloadOptions) => Promise<{ success: boolean }>;
   cancelDownload: (taskId: string) => Promise<CancelDownloadResult>;
   openFolder: (folderPath: string) => Promise<void>;
+  showItemInFolder: (filePath: string) => Promise<void>;
   checkBinaries: () => Promise<BinaryStatus>;
   updateYtDlp: () => Promise<UpdateYtDlpResult>;
   exportCookies: (url?: string) => Promise<ExportCookiesResult>;

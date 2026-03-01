@@ -26,6 +26,19 @@ interface SettingsPageProps {
   section?: 'general' | 'ytdlp';
 }
 
+const StatusBadge: React.FC<{ ok?: boolean }> = ({ ok }) =>
+  ok ? (
+    <Badge className="gap-1" variant="secondary">
+      <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+      已就绪
+    </Badge>
+  ) : (
+    <Badge className="gap-1" variant="destructive">
+      <XCircle className="h-3.5 w-3.5" />
+      未找到
+    </Badge>
+  );
+
 const SettingsPage: React.FC<SettingsPageProps> = ({ hideTitle, section }) => {
   const config = useConfigStore((s) => s.config);
   const updateConfig = useConfigStore((s) => s.updateConfig);
@@ -154,7 +167,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ hideTitle, section }) => {
     const path = await window.electronAPI.selectDownloadDirectory();
     if (path) {
       setDefaultDownloadPath(path);
-      updateConfig({ ...config, defaultDownloadPath: path });
+      updateConfig({ defaultDownloadPath: path });
     }
   };
 
@@ -215,19 +228,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ hideTitle, section }) => {
       toast.error(`保存失败: ${e?.message || '未知错误'}`);
     }
   };
-
-  const StatusBadge = ({ ok }: { ok?: boolean }) =>
-    ok ? (
-      <Badge className="gap-1" variant="secondary">
-        <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
-        已就绪
-      </Badge>
-    ) : (
-      <Badge className="gap-1" variant="destructive">
-        <XCircle className="h-3.5 w-3.5" />
-        未找到
-      </Badge>
-    );
 
   return (
     <div className="space-y-6">

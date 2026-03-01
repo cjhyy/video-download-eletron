@@ -13,6 +13,7 @@ type QueueState = {
     outputPath: string;
     format?: string;
     audioOnly: boolean;
+    cookieFile?: string;
     playlistMode?: 'single' | 'playlist';
     playlistItems?: string;
     playlistEnd?: number;
@@ -85,6 +86,7 @@ export const useQueueStore = create<QueueState>()(
           outputPath: task.outputPath,
           format: task.format,
           audioOnly: task.audioOnly,
+          cookieFile: task.cookieFile,
           playlistMode: task.playlistMode,
           playlistItems: task.playlistItems,
           playlistEnd: task.playlistEnd,
