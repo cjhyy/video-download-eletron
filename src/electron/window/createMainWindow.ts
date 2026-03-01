@@ -35,10 +35,12 @@ function resolveWindowIconPath(): string | undefined {
   const candidates = process.env.VITE_DEV_SERVER_URL
     ? [
         path.join(process.cwd(), 'assets', 'icon.ico'),
+        path.join(process.cwd(), 'assets', 'icon.jpg'),
         path.join(process.cwd(), 'assets', 'icon.png'),
       ]
     : [
         path.join(process.resourcesPath, 'assets', 'icon.ico'),
+        path.join(process.resourcesPath, 'assets', 'icon.jpg'),
         path.join(process.resourcesPath, 'assets', 'icon.png'),
       ];
 

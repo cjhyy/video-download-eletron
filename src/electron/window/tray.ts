@@ -10,12 +10,14 @@ function resolveTrayIconPath(): string | null {
     ? [
         path.join(process.resourcesPath, 'assets', 'tray.ico'),
         path.join(process.resourcesPath, 'assets', 'icon.ico'),
+        path.join(process.resourcesPath, 'assets', 'icon.jpg'),
         path.join(process.resourcesPath, 'assets', 'tray.png'),
         path.join(process.resourcesPath, 'assets', 'icon.png'),
       ]
     : [
         path.join(process.cwd(), 'assets', 'tray.ico'),
         path.join(process.cwd(), 'assets', 'icon.ico'),
+        path.join(process.cwd(), 'assets', 'icon.jpg'),
         path.join(process.cwd(), 'assets', 'tray.png'),
         path.join(process.cwd(), 'assets', 'icon.png'),
       ];
