@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPCChannels } from '../shared/ipc';
 import type {
+  BinaryName,
+  DownloadBinaryProgress,
   DownloadDoneEvent,
   DownloadErrorEvent,
   DownloadOptions,
@@ -9,6 +11,7 @@ import type {
   ElectronAPI,
   VideoInfo,
   BinaryStatus,
+  SupportedBrowser,
 } from '../shared/electron';
 
 // 暴露受保护的方法给渲染进程
@@ -106,7 +109,34 @@ const electronAPI: ElectronAPI = {
   // 移除监听器
   removeAllListeners: (channel: string): void => {
     ipcRenderer.removeAllListeners(channel);
-  }
+  },
+
+  // 从浏览器提取 Cookie（复制数据库方案，全平台无感知）
+  extractBrowserCookies: (browser: SupportedBrowser, domain?: string) =>
+    ipcRenderer.invoke(IPCChannels.EXTRACT_BROWSER_COOKIES, browser, domain),
+
+  // 检测已安装的浏览器
+  detectInstalledBrowsers: () =>
+    ipcRenderer.invoke(IPCChannels.DETECT_INSTALLED_BROWSERS),
+
+  // Bilibili 扫码登录 - 获取二维码
+  bilibiliGetQRCode: () =>
+    ipcRenderer.invoke(IPCChannels.BILIBILI_GET_QR_CODE),
+
+  // Bilibili 扫码登录 - 检查扫码状态
+  bilibiliCheckQRStatus: (qrKey: string) =>
+    ipcRenderer.invoke(IPCChannels.BILIBILI_CHECK_QR_STATUS, qrKey),
+
+  // 下载二进制文件（精简版）
+  downloadBinary: (binaryName: BinaryName) =>
+    ipcRenderer.invoke(IPCChannels.DOWNLOAD_BINARY, binaryName),
+
+  // 监听二进制文件下载进度
+  onDownloadBinaryProgress: (callback: (progress: DownloadBinaryProgress) => void): void => {
+    ipcRenderer.on(IPCChannels.DOWNLOAD_BINARY_PROGRESS, (_event, progress: DownloadBinaryProgress) =>
+      callback(progress)
+    );
+  },
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);

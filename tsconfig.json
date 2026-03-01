@@ -26,7 +26,8 @@
     "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@renderer/*": ["src/renderer/*"]
     }
   },
   "include": ["src"],

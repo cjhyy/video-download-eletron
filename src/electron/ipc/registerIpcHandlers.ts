@@ -1,240 +1,176 @@
-import { dialog, ipcMain, shell, type BrowserWindow } from 'electron';
-import * as fs from 'fs';
+import type { BrowserWindow } from 'electron';
 import { IPCChannels } from '../../shared/ipc';
-import type { DownloadOptions } from '../../shared/electron';
-import { clearCookieCache, copyCookieFile, loginAndGetCookies } from '../services/cookies';
-import { cancelDownload, checkBinaries, downloadVideo, exportCookies, getPlaylistInfo, getVideoInfo, updateYtDlp } from '../services/ytdlp';
-import { validateCookieFile, validateDownloadOptions, validatePlaylistInfoParams, validateTaskId, validateUrl, validateYtDlpArgs } from './validate';
-import { toIpcError } from './ipcError';
-import { loadUserSettings, saveUserSettings } from '../lib/userSettings';
-import { getYtDlpAdditionalArgs, setYtDlpAdditionalArgs } from '../lib/config';
-import { createTray, destroyTray } from '../window/tray';
+import type { BinaryName, DownloadOptions } from '../../shared/electron';
+import type { GetPlaylistInfoParams } from './types';
+import { ipcRegistry } from './IpcRegistry';
+import { FileHandlers, VideoHandlers, CookieHandlers, SettingsHandlers } from './handlers';
 
+/**
+ * 注册所有 IPC 处理器
+ * 使用 IpcRegistry 提供统一的超时、日志和错误处理
+ * 使用 Handler 类分离业务逻辑
+ */
 export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): void {
-  const safeHandle = <TArgs extends any[], TResult>(
-    channel: string,
-    handler: (...args: TArgs) => Promise<TResult> | TResult
-  ) => {
-    ipcMain.handle(channel, async (...args: TArgs) => {
-      try {
-        return await handler(...args);
-      } catch (err) {
-        const ipcErr = toIpcError(err);
-        // Throwing Error keeps invoke() rejection semantics; code is available via error.name.
-        throw ipcErr;
-      }
+  // 初始化 Handler 实例
+  const fileHandlers = new FileHandlers(getMainWindow);
+  const videoHandlers = new VideoHandlers();
+  const cookieHandlers = new CookieHandlers();
+  const settingsHandlers = new SettingsHandlers(getMainWindow);
+
+  // ==================== 文件操作 ====================
+
+  ipcRegistry.register(IPCChannels.SELECT_DOWNLOAD_DIRECTORY, async () => {
+    return fileHandlers.selectDownloadDirectory();
+  });
+
+  ipcRegistry.register(IPCChannels.SELECT_COOKIE_FILE, async () => {
+    return fileHandlers.selectCookieFile();
+  });
+
+  ipcRegistry.register(IPCChannels.SELECT_VIDEO_FILE, async () => {
+    return fileHandlers.selectVideoFile();
+  });
+
+  ipcRegistry.register(IPCChannels.SELECT_SUBTITLE_FILE, async () => {
+    return fileHandlers.selectSubtitleFile();
+  });
+
+  ipcRegistry.register(IPCChannels.READ_TEXT_FILE, async (_event, filePath) => {
+    return fileHandlers.readTextFile(filePath as string);
+  });
+
+  ipcRegistry.register(IPCChannels.OPEN_FOLDER, async (_event, folderPath) => {
+    return fileHandlers.openFolder(folderPath as string);
+  });
+
+  // ==================== 视频操作 ====================
+
+  ipcRegistry.register(IPCChannels.GET_VIDEO_INFO, async (_event, url, useBrowserCookies, browserPath, cookieFile) => {
+    return videoHandlers.getVideoInfo({
+      url: url as string,
+      useBrowserCookies: useBrowserCookies as boolean | undefined,
+      browserPath: browserPath as string | undefined,
+      cookieFile: cookieFile as string | undefined,
     });
-  };
+  }, { timeout: 60000 }); // 获取视频信息可能需要更长时间
 
-  // 选择下载目录
-  safeHandle(IPCChannels.SELECT_DOWNLOAD_DIRECTORY, async (): Promise<string | null> => {
-    const mainWindow = getMainWindow();
-    if (!mainWindow) return null;
+  ipcRegistry.register(IPCChannels.GET_PLAYLIST_INFO, async (_event, params) => {
+    return videoHandlers.getPlaylistInfo(params as GetPlaylistInfoParams);
+  }, { timeout: 120000 }); // 播放列表展开可能很长
 
-    const result = await dialog.showOpenDialog(mainWindow, {
-      properties: ['openDirectory'],
-    });
-
-    if (!result.canceled && result.filePaths.length > 0) {
-      return result.filePaths[0];
-    }
-
-    return null;
-  });
-
-  // 选择Cookie文件
-  safeHandle(IPCChannels.SELECT_COOKIE_FILE, async (): Promise<string | null> => {
-    const mainWindow = getMainWindow();
-    if (!mainWindow) return null;
-
-    const result = await dialog.showOpenDialog(mainWindow, {
-      properties: ['openFile'],
-      filters: [
-        { name: 'Cookie文件', extensions: ['txt'] },
-        { name: '所有文件', extensions: ['*'] },
-      ],
-      title: '选择Cookie文件',
-    });
-
-    if (!result.canceled && result.filePaths.length > 0) {
-      return result.filePaths[0];
-    }
-
-    return null;
-  });
-
-  // 选择本地视频文件（Learning 模块使用）
-  safeHandle(IPCChannels.SELECT_VIDEO_FILE, async (): Promise<string | null> => {
-    const mainWindow = getMainWindow();
-    if (!mainWindow) return null;
-
-    const result = await dialog.showOpenDialog(mainWindow, {
-      properties: ['openFile'],
-      filters: [
-        { name: '视频文件', extensions: ['mp4', 'mkv', 'webm', 'mov', 'm4v'] },
-        { name: '所有文件', extensions: ['*'] },
-      ],
-      title: '选择视频文件',
-    });
-
-    if (!result.canceled && result.filePaths.length > 0) {
-      return result.filePaths[0];
-    }
-    return null;
-  });
-
-  // 选择字幕文件（Learning 模块使用）
-  safeHandle(IPCChannels.SELECT_SUBTITLE_FILE, async (): Promise<string | null> => {
-    const mainWindow = getMainWindow();
-    if (!mainWindow) return null;
-
-    const result = await dialog.showOpenDialog(mainWindow, {
-      properties: ['openFile'],
-      filters: [
-        { name: '字幕文件', extensions: ['srt', 'vtt'] },
-        { name: '所有文件', extensions: ['*'] },
-      ],
-      title: '选择字幕文件',
-    });
-
-    if (!result.canceled && result.filePaths.length > 0) {
-      return result.filePaths[0];
-    }
-    return null;
-  });
-
-  // 读取本地文本文件（Learning 模块解析字幕使用）
-  safeHandle(IPCChannels.READ_TEXT_FILE, async (_event, filePath: string): Promise<string> => {
-    if (typeof filePath !== 'string' || !filePath) throw new Error('Invalid filePath');
-    return fs.readFileSync(filePath, 'utf8');
-  });
-
-  // 复制Cookie文件到本地目录
-  safeHandle(IPCChannels.COPY_COOKIE_FILE, async (_event, sourcePath: string, domain: string) => {
-    // Basic validation (avoid surprising types)
-    if (typeof sourcePath !== 'string' || typeof domain !== 'string') throw new Error('Invalid arguments');
-    return copyCookieFile(sourcePath, domain);
-  });
-
-  // 获取视频信息
-  safeHandle(IPCChannels.GET_VIDEO_INFO, async (_event, url: string, useBrowserCookies?: boolean, browserPath?: string, cookieFile?: string) => {
-    const validatedUrl = validateUrl(url);
-    const validatedCookieFile = validateCookieFile(cookieFile);
-    const validatedUseBrowserCookies = useBrowserCookies === undefined ? undefined : !!useBrowserCookies;
-    const validatedBrowserPath = typeof browserPath === 'string' ? browserPath : undefined;
-    return getVideoInfo({ url: validatedUrl, useBrowserCookies: validatedUseBrowserCookies, browserPath: validatedBrowserPath, cookieFile: validatedCookieFile });
-  });
-
-  // 展开播放列表/频道（flat-playlist）
-  safeHandle(IPCChannels.GET_PLAYLIST_INFO, async (_event, params: unknown) => {
-    const validated = validatePlaylistInfoParams(params);
-    return getPlaylistInfo(validated);
-  });
-
-  // 读取 yt-dlp additionalArgs（主进程 userData 配置）
-  safeHandle(IPCChannels.GET_YTDLP_ARGS, async () => {
-    return getYtDlpAdditionalArgs();
-  });
-
-  // 设置 yt-dlp additionalArgs（主进程 userData 配置）
-  safeHandle(IPCChannels.SET_YTDLP_ARGS, async (_event, additionalArgs: unknown) => {
-    const validated = validateYtDlpArgs(additionalArgs);
-    return setYtDlpAdditionalArgs(validated);
-  });
-
-  // 下载视频
-  safeHandle(IPCChannels.DOWNLOAD_VIDEO, async (event, options: DownloadOptions) => {
-    const validated = validateDownloadOptions(options);
-    const taskId = validated.taskId ?? 'unknown';
+  ipcRegistry.register(IPCChannels.DOWNLOAD_VIDEO, async (event, options) => {
+    const opts = options as DownloadOptions;
+    const taskId = opts.taskId ?? 'unknown';
     if (taskId === 'unknown') {
-      console.warn('[download-video] Missing taskId in DownloadOptions; progress events will use taskId="unknown".');
+      console.warn('[download-video] Missing taskId in DownloadOptions');
     }
     const startedAt = new Date().toISOString();
+
     try {
-      const result = await downloadVideo(validated, {
-      onProgress: (progress) =>
-        event.sender.send(IPCChannels.DOWNLOAD_PROGRESS, { taskId, ...progress }),
-      onError: (error) => event.sender.send(IPCChannels.DOWNLOAD_ERROR, { taskId, error }),
-      onLog: (level, message) =>
-        event.sender.send(IPCChannels.DOWNLOAD_LOG, { taskId, level, message, ts: new Date().toISOString() }),
+      const result = await videoHandlers.downloadVideo(opts, {
+        onProgress: (progress) =>
+          event.sender.send(IPCChannels.DOWNLOAD_PROGRESS, { taskId, ...progress }),
+        onError: (error) =>
+          event.sender.send(IPCChannels.DOWNLOAD_ERROR, { taskId, error }),
+        onLog: (level, message) =>
+          event.sender.send(IPCChannels.DOWNLOAD_LOG, { taskId, level, message, ts: new Date().toISOString() }),
       });
-      event.sender.send(IPCChannels.DOWNLOAD_DONE, { taskId, success: true, ts: new Date().toISOString(), startedAt });
+
+      event.sender.send(IPCChannels.DOWNLOAD_DONE, {
+        taskId,
+        success: true,
+        ts: new Date().toISOString(),
+        startedAt,
+      });
       return result;
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const error = err as { code?: string; name?: string; message?: string; details?: unknown };
       event.sender.send(IPCChannels.DOWNLOAD_DONE, {
         taskId,
         success: false,
         ts: new Date().toISOString(),
         startedAt,
-        error: { code: err?.code || err?.name, message: err?.message || String(err), details: err?.details },
+        error: {
+          code: error?.code || error?.name,
+          message: error?.message || String(err),
+          details: error?.details,
+        },
       });
       throw err;
     }
+  }, { timeout: 600000 }); // 下载超时 10 分钟
+
+  ipcRegistry.register(IPCChannels.CANCEL_DOWNLOAD, async (_event, taskId) => {
+    return videoHandlers.cancelDownload(taskId as string);
   });
 
-  // 取消下载（按 taskId）
-  safeHandle(IPCChannels.CANCEL_DOWNLOAD, async (_event, taskId: string) => {
-    const validatedTaskId = validateTaskId(taskId);
-    return cancelDownload(validatedTaskId);
+  ipcRegistry.register(IPCChannels.CHECK_BINARIES, async () => {
+    return videoHandlers.checkBinaries();
   });
 
-  // 打开文件夹
-  safeHandle(IPCChannels.OPEN_FOLDER, async (_event, folderPath: string): Promise<void> => {
-    await shell.openPath(folderPath);
+  ipcRegistry.register(IPCChannels.UPDATE_YT_DLP, async () => {
+    return videoHandlers.updateYtDlp();
+  }, { timeout: 120000 }); // 更新可能需要较长时间
+
+  ipcRegistry.register(IPCChannels.EXPORT_COOKIES, async (_event, url) => {
+    return videoHandlers.exportCookies(url as string | undefined);
   });
 
-  // 检查二进制文件是否存在
-  safeHandle(IPCChannels.CHECK_BINARIES, async () => {
-    return checkBinaries();
+  // ==================== Cookie 操作 ====================
+
+  ipcRegistry.register(IPCChannels.COPY_COOKIE_FILE, async (_event, sourcePath, domain) => {
+    return cookieHandlers.copyCookieFile(sourcePath as string, domain as string);
   });
 
-  // 读取用户设置（主进程启动前可读）
-  safeHandle(IPCChannels.GET_USER_SETTINGS, async () => {
-    return loadUserSettings();
+  ipcRegistry.register(IPCChannels.LOGIN_AND_GET_COOKIES, async (_event, url, domain) => {
+    return cookieHandlers.loginAndGetCookies(url as string, domain as string);
+  }, { timeout: 300000 }); // 登录可能需要用户操作
+
+  ipcRegistry.register(IPCChannels.CLEAR_COOKIE_CACHE, async () => {
+    return cookieHandlers.clearCookieCache();
   });
 
-  // 更新用户设置（主进程启动前可读）
-  safeHandle(IPCChannels.SET_USER_SETTINGS, async (_event, updates: { gpuCompatEnabled?: boolean; closeToTray?: boolean }) => {
-    if (!updates || typeof updates !== 'object') throw new Error('Invalid arguments');
-    if (updates.gpuCompatEnabled !== undefined && typeof updates.gpuCompatEnabled !== 'boolean') {
-      throw new Error('Invalid gpuCompatEnabled');
-    }
-    if (updates.closeToTray !== undefined && typeof updates.closeToTray !== 'boolean') {
-      throw new Error('Invalid closeToTray');
-    }
-    const next = saveUserSettings({ gpuCompatEnabled: updates.gpuCompatEnabled, closeToTray: updates.closeToTray });
-
-    // Keep tray state consistent with settings at runtime.
-    if (updates.closeToTray === true) {
-      createTray(getMainWindow);
-    } else if (updates.closeToTray === false) {
-      destroyTray();
-    }
-
-    return next;
+  ipcRegistry.register(IPCChannels.EXTRACT_BROWSER_COOKIES, async (_event, browser, domain) => {
+    return cookieHandlers.extractBrowserCookies(browser as string, domain as string | undefined);
   });
 
-  // 更新 yt-dlp
-  safeHandle(IPCChannels.UPDATE_YT_DLP, async () => {
-    return updateYtDlp();
+  ipcRegistry.register(IPCChannels.DETECT_INSTALLED_BROWSERS, async () => {
+    return cookieHandlers.detectInstalledBrowsers();
   });
 
-  // 导出Chrome Cookies（可传目标站点 URL，避免写死 YouTube）
-  safeHandle(IPCChannels.EXPORT_COOKIES, async (_event, url?: string) => {
-    const targetUrl = url ? validateUrl(url) : 'https://www.youtube.com';
-    return exportCookies({ url: targetUrl });
+  ipcRegistry.register(IPCChannels.BILIBILI_GET_QR_CODE, async () => {
+    return cookieHandlers.bilibiliGetQRCode();
   });
 
-  // 登录并获取Cookies
-  safeHandle(IPCChannels.LOGIN_AND_GET_COOKIES, async (_event, url: string, domain: string) => {
-    if (typeof url !== 'string' || typeof domain !== 'string') throw new Error('Invalid arguments');
-    return loginAndGetCookies(url, domain);
+  ipcRegistry.register(IPCChannels.BILIBILI_CHECK_QR_STATUS, async (_event, qrKey) => {
+    return cookieHandlers.bilibiliCheckQRStatus(qrKey as string);
   });
 
-  // 清除Cookie缓存
-  safeHandle(IPCChannels.CLEAR_COOKIE_CACHE, async () => {
-    return clearCookieCache();
+  // ==================== 设置操作 ====================
+
+  ipcRegistry.register(IPCChannels.GET_USER_SETTINGS, async () => {
+    return settingsHandlers.getUserSettings();
   });
+
+  ipcRegistry.register(IPCChannels.SET_USER_SETTINGS, async (_event, updates) => {
+    return settingsHandlers.setUserSettings(updates as { gpuCompatEnabled?: boolean; closeToTray?: boolean });
+  });
+
+  ipcRegistry.register(IPCChannels.GET_YTDLP_ARGS, async () => {
+    return settingsHandlers.getYtDlpArgs();
+  });
+
+  ipcRegistry.register(IPCChannels.SET_YTDLP_ARGS, async (_event, additionalArgs) => {
+    return settingsHandlers.setYtDlpArgs(additionalArgs);
+  });
+
+  // ==================== 二进制文件下载（精简版） ====================
+
+  ipcRegistry.register(IPCChannels.DOWNLOAD_BINARY, async (event, binaryName) => {
+    return videoHandlers.downloadBinary(binaryName as BinaryName, (progress) => {
+      event.sender.send(IPCChannels.DOWNLOAD_BINARY_PROGRESS, progress);
+    });
+  }, { timeout: 300000 }); // 下载超时 5 分钟
+
+  console.log(`[IPC] Registered ${ipcRegistry.getAllChannels().length} handlers`);
 }
-
-

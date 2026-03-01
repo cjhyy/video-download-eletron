@@ -27,6 +27,15 @@ export const IPCChannels = {
   EXPORT_COOKIES: 'export-cookies',
   LOGIN_AND_GET_COOKIES: 'login-and-get-cookies',
   CLEAR_COOKIE_CACHE: 'clear-cookie-cache',
+  // Chrome Cookie 提取
+  EXTRACT_BROWSER_COOKIES: 'extract-browser-cookies',
+  DETECT_INSTALLED_BROWSERS: 'detect-installed-browsers',
+  // Bilibili 扫码登录
+  BILIBILI_GET_QR_CODE: 'bilibili-get-qr-code',
+  BILIBILI_CHECK_QR_STATUS: 'bilibili-check-qr-status',
+  // 下载二进制文件（精简版）
+  DOWNLOAD_BINARY: 'download-binary',
+  DOWNLOAD_BINARY_PROGRESS: 'download-binary-progress',
 } as const;
 
 export type IPCChannel = (typeof IPCChannels)[keyof typeof IPCChannels];

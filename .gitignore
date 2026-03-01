@@ -98,11 +98,8 @@ Thumbs.db
 /app/dist/
 /release/
 
-# Downloaded binaries (keep structure but ignore executables)
-binaries/**/*.exe
-binaries/**/*.zip
-binaries/**/*.tar.gz
-binaries/**/*.tar.bz2
+# Binaries (yt-dlp, ffmpeg) - users download or install separately
+binaries/
 
 # Config files that might contain sensitive data
 config.local.json

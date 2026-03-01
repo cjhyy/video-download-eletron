@@ -331,11 +331,12 @@ export async function getVideoInfo(params: {
       reject(new Error(errorMsg));
     });
 
+    const timeoutMs = (config.timeouts?.getVideoInfo ?? 30) * 1000;
     const timeout = setTimeout(() => {
-      console.warn(`[${new Date().toLocaleTimeString()}] yt-dlp进程超时（30秒），正在终止...`);
+      console.warn(`[${new Date().toLocaleTimeString()}] yt-dlp进程超时（${timeoutMs / 1000}秒），正在终止...`);
       childProcess.kill('SIGKILL');
-      reject(new Error('获取视频信息超时（30秒）'));
-    }, 30000);
+      reject(new Error(`获取视频信息超时（${timeoutMs / 1000}秒）`));
+    }, timeoutMs);
 
     childProcess.on('close', () => {
       clearTimeout(timeout);
@@ -387,11 +388,15 @@ export async function downloadVideo(
       '--socket-timeout',
       config.network.socketTimeout.toString(),
       '--retries',
-      '1',
+      config.network.retries.toString(),
       '--fragment-retries',
-      '1',
+      config.network.retries.toString(),
       '--retry-sleep',
-      '0',
+      // 支持指数退避：如果启用，使用 exp=baseDelay:maxDelay 格式
+      // 例如 exp=1:30 表示从1秒开始，每次翻倍，最大30秒
+      config.network.exponentialBackoff
+        ? `exp=${config.network.retryDelay}:${Math.min(config.network.retryDelay * Math.pow(2, config.network.retries), 30)}`
+        : config.network.retryDelay.toString(),
       '--user-agent',
       config.network.userAgent,
       '--no-overwrites',
@@ -429,6 +434,8 @@ export async function downloadVideo(
       args.push('--extract-audio', '--audio-format', 'mp3');
     } else if (format) {
       args.push('--format', format);
+      // 强制合并为 mp4 格式，避免 webm 合并时的 AV1 编码兼容性问题
+      args.push('--merge-output-format', 'mp4');
     }
 
     // Post-processing options
@@ -648,6 +655,7 @@ export async function exportCookies(params?: { url?: string }): Promise<ExportCo
       return;
     }
 
+    const config = loadConfig();
     const tempDir = app.getPath('temp');
     const cookieFile = path.join(tempDir, 'yt-dlp-cookies.txt');
 
@@ -690,10 +698,11 @@ export async function exportCookies(params?: { url?: string }): Promise<ExportCo
       resolve({ success: false, error: error.message });
     });
 
+    const timeoutMs = (config.timeouts?.exportCookies ?? 30) * 1000;
     setTimeout(() => {
       childProcess.kill('SIGKILL');
-      resolve({ success: false, error: 'Cookie导出超时（30秒）' });
-    }, 30000);
+      resolve({ success: false, error: `Cookie导出超时（${timeoutMs / 1000}秒）` });
+    }, timeoutMs);
   });
 }
 
@@ -727,11 +736,14 @@ export async function getPlaylistInfo(params: {
       '--socket-timeout',
       config.network.socketTimeout.toString(),
       '--retries',
-      '1',
+      config.network.retries.toString(),
       '--fragment-retries',
-      '1',
+      config.network.retries.toString(),
       '--retry-sleep',
-      '0',
+      // 支持指数退避
+      config.network.exponentialBackoff
+        ? `exp=${config.network.retryDelay}:${Math.min(config.network.retryDelay * Math.pow(2, config.network.retries), 30)}`
+        : config.network.retryDelay.toString(),
       '--user-agent',
       config.network.userAgent,
       ...config.ytdlp.additionalArgs,
@@ -765,10 +777,11 @@ export async function getPlaylistInfo(params: {
       tailPush(stderrTail, data.toString().split(/\r?\n/), 50);
     });
 
+    const timeoutMs = (config.timeouts?.getPlaylistInfo ?? 30) * 1000;
     const timeout = setTimeout(() => {
       killProcessTree(childProcess);
-      reject(new Error('展开列表超时（30秒）'));
-    }, 30000);
+      reject(new Error(`展开列表超时（${timeoutMs / 1000}秒）`));
+    }, timeoutMs);
 
     childProcess.on('close', (code: number | null) => {
       clearTimeout(timeout);

@@ -3,6 +3,33 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { loadUserSettings } from '../lib/userSettings';
 
+/**
+ * 解析 preload 脚本路径
+ * 开发环境和生产环境都使用相同路径，因为 Vite 将 main.js 和 preload.js 输出到同一目录
+ */
+function resolvePreloadPath(): string {
+  // __dirname 在开发和生产环境都指向 dist-electron 目录
+  const preloadPath = path.join(__dirname, 'preload.js');
+
+  // 添加路径存在性检查，便于调试
+  if (!fs.existsSync(preloadPath)) {
+    console.error(`[createMainWindow] Preload script not found at: ${preloadPath}`);
+    console.error(`[createMainWindow] __dirname: ${__dirname}`);
+    console.error(`[createMainWindow] app.isPackaged: ${app.isPackaged}`);
+  }
+
+  return preloadPath;
+}
+
+/**
+ * 解析渲染进程 HTML 文件路径
+ */
+function resolveRendererPath(): string {
+  // 生产环境：从 dist-electron/../dist/index.html 加载
+  // 相当于 <app>/dist/index.html
+  return path.join(__dirname, '../dist/index.html');
+}
+
 function resolveWindowIconPath(): string | undefined {
   // BrowserWindow icon works best with .ico on Windows, .png elsewhere. We'll try common names.
   const candidates = process.env.VITE_DEV_SERVER_URL
@@ -26,6 +53,8 @@ function resolveWindowIconPath(): string | undefined {
 }
 
 export function createMainWindow(): BrowserWindow {
+  const preloadPath = resolvePreloadPath();
+
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -33,7 +62,7 @@ export function createMainWindow(): BrowserWindow {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js'),
+      preload: preloadPath,
     },
     icon: resolveWindowIconPath(),
     show: false,
@@ -43,7 +72,9 @@ export function createMainWindow(): BrowserWindow {
     win.loadURL(process.env.VITE_DEV_SERVER_URL);
     win.webContents.openDevTools();
   } else {
-    win.loadFile(path.join(__dirname, '../dist/index.html'));
+    const htmlPath = resolveRendererPath();
+    console.log(`[createMainWindow] Loading renderer from: ${htmlPath}`);
+    win.loadFile(htmlPath);
   }
 
   win.once('ready-to-show', () => {

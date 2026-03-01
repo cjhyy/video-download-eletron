@@ -1,7 +1,91 @@
+import { app } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
-import type { DownloadOptions } from '../../shared/electron';
+import * as os from 'os';
+import type { DownloadOptions, SupportedBrowser } from '../../shared/electron';
+import type { UserSettingsUpdateParams } from './types';
 import { IpcError } from './ipcError';
+
+/**
+ * 获取允许访问的安全目录列表
+ * 限制文件操作只能在这些目录下进行，防止路径遍历攻击
+ */
+function getSafeDirectories(): string[] {
+  const home = os.homedir();
+  const safeDirs = [
+    home, // 用户主目录
+    app.getPath('userData'), // 应用数据目录
+    app.getPath('temp'), // 临时目录
+    app.getPath('downloads'), // 下载目录
+    app.getPath('documents'), // 文档目录
+    app.getPath('desktop'), // 桌面
+    app.getPath('videos'), // 视频目录
+    app.getPath('music'), // 音乐目录
+  ];
+  return safeDirs.filter(Boolean);
+}
+
+/**
+ * 验证路径是否在安全目录内
+ * 防止路径遍历攻击（如 ../../etc/passwd）
+ */
+export function validateSafePath(filePath: unknown, fieldName: string): string {
+  if (typeof filePath !== 'string' || !filePath.trim()) {
+    throw new IpcError('VALIDATION_ERROR', `Invalid ${fieldName}: must be a non-empty string`);
+  }
+
+  // 规范化路径，解析 .. 和 . 等相对路径组件
+  const normalizedPath = path.resolve(filePath);
+
+  // 检查路径是否在安全目录内
+  const safeDirs = getSafeDirectories();
+  const isInSafeDir = safeDirs.some(safeDir => {
+    const normalizedSafeDir = path.resolve(safeDir);
+    return normalizedPath.startsWith(normalizedSafeDir + path.sep) || normalizedPath === normalizedSafeDir;
+  });
+
+  if (!isInSafeDir) {
+    throw new IpcError('PERMISSION_DENIED', `Access denied: ${fieldName} is outside allowed directories`);
+  }
+
+  return normalizedPath;
+}
+
+/**
+ * 验证文件路径（必须存在且在安全目录内）
+ */
+export function validateSafeFilePath(filePath: unknown, fieldName: string): string {
+  const safePath = validateSafePath(filePath, fieldName);
+
+  if (!fs.existsSync(safePath)) {
+    throw new IpcError('NOT_FOUND', `${fieldName} does not exist`);
+  }
+
+  const stat = fs.statSync(safePath);
+  if (!stat.isFile()) {
+    throw new IpcError('VALIDATION_ERROR', `${fieldName} is not a file`);
+  }
+
+  return safePath;
+}
+
+/**
+ * 验证目录路径（必须存在且在安全目录内）
+ */
+export function validateSafeDirPath(dirPath: unknown, fieldName: string): string {
+  const safePath = validateSafePath(dirPath, fieldName);
+
+  if (!fs.existsSync(safePath)) {
+    throw new IpcError('NOT_FOUND', `${fieldName} does not exist`);
+  }
+
+  const stat = fs.statSync(safePath);
+  if (!stat.isDirectory()) {
+    throw new IpcError('VALIDATION_ERROR', `${fieldName} is not a directory`);
+  }
+
+  return safePath;
+}
 
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.trim().length > 0;
@@ -80,6 +164,77 @@ export function validateRateLimit(rateLimit: unknown): string | undefined {
   if (!/^\d+(\.\d+)?[KMG]?$/i.test(trimmed)) throw new IpcError('VALIDATION_ERROR', 'Invalid rateLimit');
   return trimmed;
 }
+
+// ==================== Cookie 相关验证 ====================
+
+/** 支持的浏览器列表（与 shared/electron.ts 中 SupportedBrowser 保持一致） */
+const SUPPORTED_BROWSERS: readonly SupportedBrowser[] = ['chrome', 'edge', 'chromium', 'brave', 'opera', 'vivaldi'];
+
+/**
+ * 验证域名
+ */
+export function validateDomain(domain: unknown): string {
+  return assertNonEmptyString(domain, 'domain');
+}
+
+/**
+ * 验证浏览器类型
+ */
+export function validateBrowser(browser: unknown): SupportedBrowser {
+  const s = assertNonEmptyString(browser, 'browser');
+  if (!SUPPORTED_BROWSERS.includes(s as SupportedBrowser)) {
+    throw new IpcError('VALIDATION_ERROR', `不支持的浏览器: ${s}`);
+  }
+  return s as SupportedBrowser;
+}
+
+/**
+ * 验证可选域名（可为空）
+ */
+export function validateOptionalDomain(domain: unknown): string | undefined {
+  if (domain === undefined || domain === null || domain === '') return undefined;
+  if (typeof domain !== 'string') throw new IpcError('VALIDATION_ERROR', 'Invalid domain');
+  return domain.trim() || undefined;
+}
+
+/**
+ * 验证 Bilibili QR Key
+ */
+export function validateQrKey(qrKey: unknown): string {
+  return assertNonEmptyString(qrKey, 'qrKey');
+}
+
+// ==================== 设置相关验证 ====================
+
+/**
+ * 验证用户设置更新参数
+ */
+export function validateUserSettingsUpdate(updates: unknown): UserSettingsUpdateParams {
+  if (!updates || typeof updates !== 'object') {
+    throw new IpcError('VALIDATION_ERROR', 'Invalid arguments');
+  }
+  const o = updates as Record<string, unknown>;
+
+  const result: UserSettingsUpdateParams = {};
+
+  if (o.gpuCompatEnabled !== undefined) {
+    if (typeof o.gpuCompatEnabled !== 'boolean') {
+      throw new IpcError('VALIDATION_ERROR', 'Invalid gpuCompatEnabled');
+    }
+    result.gpuCompatEnabled = o.gpuCompatEnabled;
+  }
+
+  if (o.closeToTray !== undefined) {
+    if (typeof o.closeToTray !== 'boolean') {
+      throw new IpcError('VALIDATION_ERROR', 'Invalid closeToTray');
+    }
+    result.closeToTray = o.closeToTray;
+  }
+
+  return result;
+}
+
+// ==================== yt-dlp 参数验证 ====================
 
 export function validateYtDlpArgs(additionalArgs: unknown): string[] {
   if (additionalArgs === undefined || additionalArgs === null) return [];

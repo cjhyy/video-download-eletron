@@ -148,7 +148,25 @@ export interface BinaryStatus {
     ytDlp: string;
     ffmpeg: string;
   };
+  /** 是否使用内置（完整版）的二进制文件 */
+  bundled?: {
+    ytDlp: boolean;
+    ffmpeg: boolean;
+  };
 }
+
+export type BinaryName = 'yt-dlp' | 'ffmpeg';
+
+export interface DownloadBinaryProgress {
+  binary: BinaryName;
+  percent: number;
+  downloadedBytes: number;
+  totalBytes: number;
+}
+
+export type DownloadBinaryResult =
+  | { success: true; path: string }
+  | { success: false; error: string };
 
 export type CopyCookieFileResult =
   | { success: true; cookieFile: string }
@@ -169,6 +187,28 @@ export type LoginAndGetCookiesResult =
 export type ClearCookieCacheResult =
   | { success: true; message: string }
   | { success: false; error: string };
+
+// Chrome Cookie 提取
+export type SupportedBrowser = 'chrome' | 'edge' | 'chromium' | 'brave' | 'opera' | 'vivaldi';
+
+export type ExtractBrowserCookiesResult =
+  | { success: true; cookieFile: string; cookieCount: number }
+  | { success: false; error: string };
+
+// Bilibili 扫码登录
+export interface BilibiliQRCodeResult {
+  success: boolean;
+  qrUrl?: string;      // 二维码内容 URL
+  qrKey?: string;      // 用于轮询状态的 key
+  error?: string;
+}
+
+export interface BilibiliQRStatusResult {
+  success: boolean;
+  status?: 'waiting' | 'scanned' | 'confirmed' | 'expired';
+  cookieFile?: string;  // 登录成功时返回
+  error?: string;
+}
 
 export interface ElectronAPI {
   selectDownloadDirectory: () => Promise<string | null>;
@@ -207,6 +247,15 @@ export interface ElectronAPI {
   getUserSettings: () => Promise<{ gpuCompatEnabled: boolean; closeToTray: boolean }>;
   setUserSettings: (updates: { gpuCompatEnabled?: boolean; closeToTray?: boolean }) => Promise<{ gpuCompatEnabled: boolean; closeToTray: boolean }>;
   removeAllListeners: (channel: IPCChannel | string) => void;
+  // Chrome Cookie 提取
+  extractBrowserCookies: (browser: SupportedBrowser, domain?: string) => Promise<ExtractBrowserCookiesResult>;
+  detectInstalledBrowsers: () => Promise<SupportedBrowser[]>;
+  // Bilibili 扫码登录
+  bilibiliGetQRCode: () => Promise<BilibiliQRCodeResult>;
+  bilibiliCheckQRStatus: (qrKey: string) => Promise<BilibiliQRStatusResult>;
+  // 下载二进制文件（精简版）
+  downloadBinary: (binaryName: BinaryName) => Promise<DownloadBinaryResult>;
+  onDownloadBinaryProgress: (callback: (progress: DownloadBinaryProgress) => void) => void;
 }
 
 
