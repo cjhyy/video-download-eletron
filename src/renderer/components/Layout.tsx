@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Download, Settings, ListChecks, Menu, Video, ArrowLeft, ChevronRight, GraduationCap } from 'lucide-react';
+import { Settings, Menu, Video, ArrowLeft, ChevronRight, type LucideIcon } from 'lucide-react';
 import { cn } from '@renderer/lib/utils';
 import { Button } from '@renderer/components/ui/button';
 import { Separator } from '@renderer/components/ui/separator';
@@ -12,136 +12,219 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@renderer/components/ui/sheet';
+import {
+  MAIN_MENU_ITEMS,
+  SETTINGS_SECTIONS,
+  type MenuItem,
+  type SettingSection,
+} from '@renderer/constants/navigation';
 
 interface LayoutProps {
   children: React.ReactNode;
 }
 
+// 导航项组件
+interface NavItemProps {
+  item: MenuItem;
+  active: boolean;
+  onNavigate?: () => void;
+}
+
+const NavItem: React.FC<NavItemProps> = ({ item, active, onNavigate }) => {
+  const navigate = useNavigate();
+  const Icon = item.icon;
+
+  const handleClick = useCallback(() => {
+    navigate(item.path);
+    onNavigate?.();
+  }, [navigate, item.path, onNavigate]);
+
+  return (
+    <button
+      onClick={handleClick}
+      className={cn(
+        'flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors w-full text-left',
+        active
+          ? 'bg-accent text-accent-foreground font-medium'
+          : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+      )}
+    >
+      <Icon className={cn('h-4 w-4', active && 'text-primary')} />
+      <span>{item.label}</span>
+    </button>
+  );
+};
+
+// 设置分区导航组件
+interface SettingsSectionNavProps {
+  sections: readonly SettingSection[];
+  onNavigate?: () => void;
+}
+
+const SettingsSectionNav: React.FC<SettingsSectionNavProps> = ({ sections, onNavigate }) => {
+  const scrollToAnchor = useCallback(
+    (anchor: string) => {
+      const element = document.getElementById(anchor);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth' });
+      }
+      onNavigate?.();
+    },
+    [onNavigate]
+  );
+
+  return (
+    <div className="px-2 space-y-4">
+      <div className="px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+        应用设置
+      </div>
+      <div className="space-y-6">
+        {sections.map((section) => (
+          <div key={section.id} className="px-2">
+            <button
+              onClick={() => scrollToAnchor(section.anchor)}
+              className="w-full text-left px-2 py-1.5 text-sm font-bold text-foreground hover:text-primary transition-colors flex items-center gap-1"
+            >
+              <ChevronRight className="h-3 w-3" />
+              {section.label}
+            </button>
+            {section.items && section.items.length > 0 && (
+              <div className="mt-1 ml-4 border-l-2 border-muted pl-2 space-y-1">
+                {section.items.map((subItem) => (
+                  <button
+                    key={subItem.anchor}
+                    onClick={() => scrollToAnchor(subItem.anchor)}
+                    className="w-full text-left px-2 py-1.5 text-xs text-muted-foreground hover:text-primary hover:bg-accent rounded-sm transition-all block"
+                  >
+                    {subItem.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// 主菜单导航组件
+interface MainMenuNavProps {
+  items: readonly MenuItem[];
+  currentPath: string;
+  onNavigate?: () => void;
+}
+
+const MainMenuNav: React.FC<MainMenuNavProps> = ({ items, currentPath, onNavigate }) => {
+  return (
+    <nav className="flex flex-col gap-1 p-2">
+      {items.map((item) => (
+        <NavItem
+          key={item.path}
+          item={item}
+          active={currentPath === item.path}
+          onNavigate={onNavigate}
+        />
+      ))}
+    </nav>
+  );
+};
+
+// 底部返回/设置按钮组件
+interface SidebarFooterProps {
+  isSettingsMode: boolean;
+  currentPath: string;
+  onNavigate?: () => void;
+}
+
+const SidebarFooter: React.FC<SidebarFooterProps> = ({ isSettingsMode, currentPath, onNavigate }) => {
+  const navigate = useNavigate();
+
+  if (isSettingsMode) {
+    return (
+      <button
+        onClick={() => {
+          navigate('/download');
+          onNavigate?.();
+        }}
+        className="flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors w-full text-left text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        <span>返回主页</span>
+      </button>
+    );
+  }
+
+  return (
+    <NavItem
+      item={{ id: 'settings', label: '设置', icon: Settings, path: '/settings' }}
+      active={currentPath === '/settings'}
+      onNavigate={onNavigate}
+    />
+  );
+};
+
+// 侧边栏内容组件（共享逻辑）
+interface SidebarContentProps {
+  isSettingsMode: boolean;
+  currentPath: string;
+  onNavigate?: () => void;
+}
+
+const SidebarContent: React.FC<SidebarContentProps> = ({ isSettingsMode, currentPath, onNavigate }) => {
+  return (
+    <>
+      <div className="flex-1 overflow-auto py-2">
+        {isSettingsMode ? (
+          <SettingsSectionNav sections={SETTINGS_SECTIONS} onNavigate={onNavigate} />
+        ) : (
+          <MainMenuNav items={MAIN_MENU_ITEMS} currentPath={currentPath} onNavigate={onNavigate} />
+        )}
+      </div>
+      <Separator />
+      <div className="p-2">
+        <SidebarFooter isSettingsMode={isSettingsMode} currentPath={currentPath} onNavigate={onNavigate} />
+      </div>
+    </>
+  );
+};
+
+// Logo 组件
+interface LogoProps {
+  onClick?: () => void;
+}
+
+const Logo: React.FC<LogoProps> = ({ onClick }) => {
+  return (
+    <div
+      className={cn('flex h-14 items-center gap-2 px-4', onClick && 'cursor-pointer')}
+      onClick={onClick}
+    >
+      <Video className="h-5 w-5 text-primary" />
+      <div className="font-bold text-primary tracking-tight">Video Download</div>
+    </div>
+  );
+};
+
 const Layout: React.FC<LayoutProps> = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const menuItems = [
-    { label: '视频下载', icon: Download, path: '/download' },
-    { label: '下载队列', icon: ListChecks, path: '/queue' },
-    // { label: '英语训练', icon: GraduationCap, path: '/learning' }, // 暂时隐藏
-  ] as const;
-
-  const settingSections = [
-    {
-      label: '常规设置',
-      id: 'general-section',
-      items: [] as { label: string; anchor: string }[]
-    },
-    {
-      label: '下载引擎',
-      id: 'ytdlp-section',
-      items: [] as { label: string; anchor: string }[]
-    },
-    {
-      label: 'Cookie 管理',
-      id: 'cookie-section',
-      items: [
-        { label: '功能开关', anchor: 'cookie-switch' },
-        { label: '已保存配置', anchor: 'cookie-list' },
-        { label: '添加配置', anchor: 'get-cookie' },
-      ]
-    }
-  ] as const;
-
   const isSettingsMode = location.pathname.startsWith('/settings');
+  const currentPath = location.pathname;
 
-  const scrollToAnchor = (anchor: string) => {
-    const element = document.getElementById(anchor);
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth' });
-    }
-  };
-
-  const NavItem = ({ item, onNavigate }: { item: { label: string, icon: any, path: string }, onNavigate?: () => void }) => {
-    const active = location.pathname === item.path;
-    const Icon = item.icon;
-    return (
-      <button
-        onClick={() => {
-          navigate(item.path);
-          onNavigate?.();
-        }}
-        className={cn(
-          'flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors w-full text-left',
-          active
-            ? 'bg-accent text-accent-foreground font-medium'
-            : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-        )}
-      >
-        <Icon className={cn("h-4 w-4", active && "text-primary")} />
-        <span>{item.label}</span>
-      </button>
-    );
-  };
+  // 获取当前页面标题
+  const pageTitle = isSettingsMode
+    ? '设置中心'
+    : MAIN_MENU_ITEMS.find((i) => i.path === currentPath)?.label || 'Video Download';
 
   return (
     <div className="flex h-dvh bg-background overflow-hidden">
       {/* Desktop sidebar */}
       <aside className="hidden w-64 shrink-0 border-r bg-card sm:flex sm:flex-col">
-        <div className="flex h-14 items-center gap-2 px-4 cursor-pointer" onClick={() => navigate('/download')}>
-          <Video className="h-5 w-5 text-primary" />
-          <div className="font-bold text-primary tracking-tight">Listen BD</div>
-        </div>
+        <Logo onClick={() => navigate('/download')} />
         <Separator />
-        <div className="flex-1 overflow-auto py-2">
-          {!isSettingsMode ? (
-            <nav className="flex flex-col gap-1 p-2">
-              {menuItems.map((item) => (
-                <NavItem key={item.path} item={item} />
-              ))}
-            </nav>
-          ) : (
-            <div className="px-2 space-y-4">
-              <div className="px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                应用设置
-              </div>
-              <div className="space-y-6">
-                {settingSections.map((section) => (
-                  <div key={section.id} className="px-2">
-                    <button 
-                      onClick={() => scrollToAnchor(section.id)}
-                      className="w-full text-left px-2 py-1.5 text-sm font-bold text-foreground hover:text-primary transition-colors flex items-center gap-1"
-                    >
-                      <ChevronRight className="h-3 w-3" />
-                      {section.label}
-                    </button>
-                    <div className="mt-1 ml-4 border-l-2 border-muted pl-2 space-y-1">
-                      {section.items.map((subItem) => (
-                        <button
-                          key={subItem.anchor}
-                          onClick={() => scrollToAnchor(subItem.anchor)}
-                          className="w-full text-left px-2 py-1.5 text-xs text-muted-foreground hover:text-primary hover:bg-accent rounded-sm transition-all block"
-                        >
-                          {subItem.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-        <Separator />
-        <div className="p-2">
-          {isSettingsMode ? (
-            <button
-              onClick={() => navigate('/download')}
-              className="flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors w-full text-left text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              <span>返回主页</span>
-            </button>
-          ) : (
-            <NavItem item={{ label: '设置', icon: Settings, path: '/settings' }} />
-          )}
-        </div>
+        <SidebarContent isSettingsMode={isSettingsMode} currentPath={currentPath} />
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -158,76 +241,14 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 <SheetTitle>导航菜单</SheetTitle>
                 <SheetDescription>选择要打开的页面或设置项</SheetDescription>
               </SheetHeader>
-              <div className="flex h-14 items-center gap-2 px-4">
-                <Video className="h-5 w-5 text-primary" />
-                <div className="font-semibold text-primary">Listen BD</div>
-              </div>
+              <Logo />
               <Separator />
-              <div className="flex-1 overflow-auto py-2">
-                {!isSettingsMode ? (
-                  <nav className="flex flex-col gap-1 p-2">
-                    {menuItems.map((item) => (
-                      <NavItem key={item.path} item={item} onNavigate={() => {}} />
-                    ))}
-                  </nav>
-                ) : (
-                  <div className="px-2 space-y-4">
-                    <div className="px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                      应用设置
-                    </div>
-                    <div className="space-y-6">
-                      {settingSections.map((section) => (
-                        <div key={section.id} className="px-2">
-                          <button 
-                            onClick={() => {
-                              scrollToAnchor(section.id);
-                              // Close sheet logic would go here if we had state
-                            }}
-                            className="w-full text-left px-2 py-1.5 text-sm font-bold text-foreground hover:text-primary transition-colors flex items-center gap-1"
-                          >
-                            <ChevronRight className="h-3 w-3" />
-                            {section.label}
-                          </button>
-                          <div className="mt-1 ml-4 border-l-2 border-muted pl-2 space-y-1">
-                            {section.items.map((subItem) => (
-                              <button
-                                key={subItem.anchor}
-                                onClick={() => scrollToAnchor(subItem.anchor)}
-                                className="w-full text-left px-2 py-1.5 text-xs text-muted-foreground hover:text-primary hover:bg-accent rounded-sm transition-all block"
-                              >
-                                {subItem.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-              <Separator />
-              <div className="p-2">
-                {isSettingsMode ? (
-                  <button
-                    onClick={() => {
-                      navigate('/download');
-                    }}
-                    className="flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors w-full text-left text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                  >
-                    <ArrowLeft className="h-4 w-4" />
-                    <span>返回主页</span>
-                  </button>
-                ) : (
-                  <NavItem item={{ label: '设置', icon: Settings, path: '/settings' }} onNavigate={() => {}} />
-                )}
-              </div>
+              <SidebarContent isSettingsMode={isSettingsMode} currentPath={currentPath} />
             </SheetContent>
           </Sheet>
 
           <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium">
-              {isSettingsMode ? '设置中心' : (menuItems.find(i => i.path === location.pathname)?.label || 'Listen BD')}
-            </div>
+            <div className="truncate text-sm font-medium">{pageTitle}</div>
           </div>
         </header>
 
@@ -241,4 +262,3 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 };
 
 export default Layout;
-
