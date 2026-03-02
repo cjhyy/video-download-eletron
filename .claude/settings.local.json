@@ -10,7 +10,8 @@
       "Bash(git tag:*)",
       "Bash(git push:*)",
       "Bash(gh release create:*)",
-      "Bash(\"release/full/Video Downloader-1.1.3-full-arm64.dmg\")"
+      "Bash(\"release/full/Video Downloader-1.1.3-full-arm64.dmg\")",
+      "Bash(ls:*)"
     ]
   }
 }

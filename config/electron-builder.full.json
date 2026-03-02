@@ -37,7 +37,7 @@
   ],
   "win": {
     "target": "nsis",
-    "icon": "assets/favicon/favicon.ico",
+    "icon": "assets/favicon/android-chrome-512x512.png",
     "artifactName": "${productName}-${version}-full-${arch}.${ext}"
   },
   "mac": {
