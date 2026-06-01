@@ -8,6 +8,7 @@ import type {
   ExportCookiesResult,
   PlaylistInfo,
   UpdateYtDlpResult,
+  CheckYtDlpUpdateResult,
   VideoInfo,
 } from '../../../shared/electron';
 import type { GetVideoInfoParams, GetPlaylistInfoParams } from '../types';
@@ -25,6 +26,7 @@ import {
   cancelDownload as ytdlpCancelDownload,
   checkBinaries as ytdlpCheckBinaries,
   updateYtDlp as ytdlpUpdateYtDlp,
+  checkYtDlpUpdate as ytdlpCheckYtDlpUpdate,
   exportCookies as ytdlpExportCookies,
 } from '../../services/ytdlp';
 import { downloadBinary } from '../../services/binaryDownloader';
@@ -107,6 +109,11 @@ export class VideoHandlers {
   /** 更新 yt-dlp */
   async updateYtDlp(): Promise<UpdateYtDlpResult> {
     return ytdlpUpdateYtDlp();
+  }
+
+  /** 检查 yt-dlp 是否有更新（与 GitHub 最新版本比对） */
+  async checkYtDlpUpdate(): Promise<CheckYtDlpUpdateResult> {
+    return ytdlpCheckYtDlpUpdate();
   }
 
   /** 导出 Cookies */

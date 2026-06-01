@@ -46,6 +46,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ hideTitle, section }) => {
   const [maxConcurrentDownloads, setMaxConcurrentDownloads] = useState(3);
   const [binaryStatus, setBinaryStatus] = useState<BinaryStatus | null>(null);
   const [updating, setUpdating] = useState(false);
+  const [checking, setChecking] = useState(false);
   const [downloading, setDownloading] = useState<{ ytDlp: boolean; ffmpeg: boolean }>({ ytDlp: false, ffmpeg: false });
   const [downloadProgress, setDownloadProgress] = useState<{ ytDlp: number; ffmpeg: number }>({ ytDlp: 0, ffmpeg: 0 });
   const [ytdlpArgsText, setYtdlpArgsText] = useState<string>('');
@@ -160,6 +161,37 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ hideTitle, section }) => {
       setBinaryStatus(status);
     } catch (error) {
       console.error('Failed to check binaries:', error);
+    }
+  };
+
+  // 「重新检查」按钮：刷新本地状态 + 与 GitHub 最新版本比对，并给出明确提示。
+  const handleRecheck = async () => {
+    setChecking(true);
+    try {
+      await checkBinaries();
+      const result = await window.electronAPI.checkYtDlpUpdate();
+      switch (result.status) {
+        case 'up-to-date':
+          toast.success(`yt-dlp 已是最新版本（v${result.current}）`);
+          break;
+        case 'update-available':
+          toast.info(`发现新版本 v${result.latest}（当前 v${result.current}），点击「更新 yt-dlp」升级`);
+          break;
+        case 'not-installed':
+          toast.warning('未检测到 yt-dlp，请先下载');
+          break;
+        case 'check-failed':
+          toast.warning(
+            result.current
+              ? `当前 v${result.current}；暂时无法获取最新版本信息，请稍后再试`
+              : '暂时无法获取最新版本信息，请稍后再试',
+          );
+          break;
+      }
+    } catch (error: any) {
+      toast.error(`检查失败: ${error?.message ?? error}`);
+    } finally {
+      setChecking(false);
     }
   };
 
@@ -395,10 +427,11 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ hideTitle, section }) => {
                     className="gap-2"
                   >
                     <RefreshCcw className={cn("h-4 w-4", updating && "animate-spin")} />
-                    {updating ? '正在检查更新...' : '更新 yt-dlp'}
+                    {updating ? '正在更新...' : '更新 yt-dlp'}
                   </Button>
-                  <Button variant="outline" onClick={checkBinaries}>
-                    重新检查
+                  <Button variant="outline" onClick={handleRecheck} disabled={checking} className="gap-2">
+                    <RefreshCcw className={cn("h-4 w-4", checking && "animate-spin")} />
+                    {checking ? '检查中...' : '重新检查'}
                   </Button>
                 </div>
                 <div className="text-xs text-muted-foreground">

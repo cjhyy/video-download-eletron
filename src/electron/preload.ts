@@ -70,6 +70,9 @@ const electronAPI: ElectronAPI = {
   
   // 更新 yt-dlp
   updateYtDlp: () => ipcRenderer.invoke(IPCChannels.UPDATE_YT_DLP),
+
+  // 检查 yt-dlp 是否有更新
+  checkYtDlpUpdate: () => ipcRenderer.invoke(IPCChannels.CHECK_YT_DLP_UPDATE),
   
   // 导出Cookies
   exportCookies: (url?: string) => ipcRenderer.invoke(IPCChannels.EXPORT_COOKIES, url),

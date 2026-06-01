@@ -19,6 +19,7 @@ export const IPCChannels = {
   SHOW_ITEM_IN_FOLDER: 'show-item-in-folder',
   CHECK_BINARIES: 'check-binaries',
   UPDATE_YT_DLP: 'update-yt-dlp',
+  CHECK_YT_DLP_UPDATE: 'check-yt-dlp-update',
   DOWNLOAD_PROGRESS: 'download-progress',
   DOWNLOAD_ERROR: 'download-error',
   DOWNLOAD_LOG: 'download-log',

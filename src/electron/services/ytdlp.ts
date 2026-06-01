@@ -1,5 +1,5 @@
 import { app } from 'electron';
-import { spawn, type ChildProcess } from 'child_process';
+import { spawn, execFileSync, type ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import type {
@@ -9,10 +9,12 @@ import type {
   DownloadProgress,
   ExportCookiesResult,
   UpdateYtDlpResult,
+  CheckYtDlpUpdateResult,
   VideoInfo,
   PlaylistInfo,
 } from '../../shared/electron';
 import { getBinaryPath } from '../lib/binaries';
+import { downloadBinary, getLatestYtDlpVersion } from './binaryDownloader';
 import { loadConfig } from '../lib/config';
 import { IpcError } from '../ipc/ipcError';
 
@@ -185,14 +187,18 @@ function buildDownloadFailureMessage(stderrTail: string[], exitCode: number | nu
 }
 
 // 获取二进制文件版本号
-function getBinaryVersion(binaryPath: string, versionArg: string = '--version'): string | undefined {
+// yt-dlp 的 _macos / .exe 独立二进制是 PyInstaller 打包，首次运行需把内嵌的
+// Python 运行时解压到临时目录，冷启动 `--version` 可能耗时 20s+。超时必须足够大，
+// 否则会超时返回 undefined，导致界面版本号空白、「重新检查」像没反应。
+export const BINARY_VERSION_TIMEOUT_MS = 30000;
+
+export function getBinaryVersion(binaryPath: string, versionArg: string = '--version'): string | undefined {
   try {
     if (!fs.existsSync(binaryPath)) return undefined;
 
-    const { execFileSync } = require('child_process');
     const output = execFileSync(binaryPath, [versionArg], {
       encoding: 'utf8',
-      timeout: 5000,
+      timeout: BINARY_VERSION_TIMEOUT_MS,
       windowsHide: true,
     }).trim();
 
@@ -689,63 +695,68 @@ export async function downloadVideo(
 }
 
 export async function updateYtDlp(): Promise<UpdateYtDlpResult> {
-  return new Promise((resolve) => {
-    const ytDlpPath = getBinaryPath('yt-dlp');
+  // 更新方式：直接从 GitHub releases 把最新版下载到用户数据目录（可写位置），
+  // 而非调用 `yt-dlp -U` 让其覆盖自身。原因：
+  //  1. 打包后内置二进制位于只读目录（macOS .app / Windows Program Files），
+  //     自我覆盖会因权限不足失败，并可能破坏 macOS 代码签名；
+  //  2. 走 releases/latest/download 重定向下载，不调用 GitHub API，
+  //     避开匿名请求每小时 60 次的速率限制（HTTP 403）。
+  // 下载落地的用户数据目录在 getBinaryPath 中优先级高于内置版本，
+  // 因此下载完成后新版会立即生效。
+  console.log(`[${new Date().toLocaleTimeString()}] 开始更新 yt-dlp（下载最新版到用户数据目录）...`);
 
-    if (!fs.existsSync(ytDlpPath)) {
-      resolve({ success: false, error: 'yt-dlp 未找到' });
-      return;
+  try {
+    const result = await downloadBinary('yt-dlp', (progress) => {
+      console.log(`[${new Date().toLocaleTimeString()}] yt-dlp 下载进度: ${progress.percent}%`);
+    });
+
+    if (result.success) {
+      console.log(`[${new Date().toLocaleTimeString()}] yt-dlp 更新成功: ${result.path}`);
+      return { success: true, message: 'yt-dlp 更新成功！已下载最新版本。' };
     }
 
-    console.log(`[${new Date().toLocaleTimeString()}] 开始更新 yt-dlp...`);
-    console.log(`[${new Date().toLocaleTimeString()}] yt-dlp 路径: ${ytDlpPath}`);
+    // strictNullChecks 关闭，判别式联合不会自动收窄，这里显式取出 error 字段。
+    const downloadError = (result as { error: string }).error;
+    console.error(`[${new Date().toLocaleTimeString()}] yt-dlp 更新失败: ${downloadError}`);
+    if (downloadError.includes('403')) {
+      return {
+        success: false,
+        error: '更新失败：请求过于频繁（GitHub 限流），请稍后再试。',
+      };
+    }
+    return { success: false, error: `更新失败: ${downloadError}` };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[${new Date().toLocaleTimeString()}] yt-dlp 更新异常:`, error);
+    return { success: false, error: `更新失败: ${message}` };
+  }
+}
 
-    const args = ['-v', '-U'];
-    const childProcess = spawn(ytDlpPath, args);
+/**
+ * 检查 yt-dlp 是否有可用更新：读取本地版本号，并与 GitHub 最新发布版本比对。
+ * 远端查询失败（如 403 限流、网络问题）时降级为 check-failed，不抛错、仍带回本地版本。
+ */
+export async function checkYtDlpUpdate(): Promise<CheckYtDlpUpdateResult> {
+  const ytDlpPath = getBinaryPath('yt-dlp');
+  const current = fs.existsSync(ytDlpPath) ? getBinaryVersion(ytDlpPath, '--version') : undefined;
 
-    let stdout = '';
-    let stderr = '';
+  let latest: string;
+  try {
+    latest = await getLatestYtDlpVersion();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[${new Date().toLocaleTimeString()}] 获取 yt-dlp 最新版本失败: ${message}`);
+    return { status: 'check-failed', current, error: message };
+  }
 
-    childProcess.stdout?.on('data', (data: Buffer) => {
-      const output = data.toString();
-      stdout += output;
-      console.log(`[${new Date().toLocaleTimeString()}] yt-dlp 更新输出: ${output.trim()}`);
-    });
+  if (!current) {
+    return { status: 'not-installed', latest };
+  }
 
-    childProcess.stderr?.on('data', (data: Buffer) => {
-      const output = data.toString();
-      stderr += output;
-      console.log(`[${new Date().toLocaleTimeString()}] yt-dlp 更新错误: ${output.trim()}`);
-    });
-
-    childProcess.on('close', (code: number | null) => {
-      console.log(`[${new Date().toLocaleTimeString()}] yt-dlp 更新进程结束，退出码: ${code}`);
-
-      if (code === 0) {
-        if (stdout.includes('already up to date') || stdout.includes('已是最新版本')) {
-          resolve({ success: true, message: 'yt-dlp 已经是最新版本' });
-        } else if (stdout.includes('Updated') || stdout.includes('更新成功')) {
-          resolve({ success: true, message: 'yt-dlp 更新成功！' });
-        } else {
-          resolve({ success: true, message: stdout.trim() || 'yt-dlp 更新完成' });
-        }
-      } else {
-        const errorMsg = stderr || stdout || '更新失败';
-        console.error(`[${new Date().toLocaleTimeString()}] yt-dlp 更新失败: ${errorMsg}`);
-
-        if (errorMsg.includes('Permission denied') || errorMsg.includes('权限')) {
-          resolve({ success: false, error: '更新失败：权限不足。请尝试以管理员身份运行应用。' });
-        } else {
-          resolve({ success: false, error: `更新失败: ${errorMsg}` });
-        }
-      }
-    });
-
-    childProcess.on('error', (error: Error) => {
-      console.error(`[${new Date().toLocaleTimeString()}] yt-dlp 更新进程错误:`, error);
-      resolve({ success: false, error: `更新进程错误: ${error.message}` });
-    });
-  });
+  // yt-dlp 版本号是日期格式（YYYY.MM.DD[.postN]），字符串比较即为时间先后顺序。
+  return current === latest
+    ? { status: 'up-to-date', current, latest }
+    : { status: 'update-available', current, latest };
 }
 
 export async function exportCookies(params?: { url?: string }): Promise<ExportCookiesResult> {

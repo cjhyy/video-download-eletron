@@ -185,6 +185,13 @@ export type UpdateYtDlpResult =
   | { success: true; message: string }
   | { success: false; error: string };
 
+/** 检查 yt-dlp 是否有更新（与 GitHub 最新版本比对）的结果 */
+export type CheckYtDlpUpdateResult =
+  | { status: 'up-to-date'; current: string; latest: string }
+  | { status: 'update-available'; current: string; latest: string }
+  | { status: 'not-installed'; latest?: string }
+  | { status: 'check-failed'; current?: string; error: string };
+
 export type ExportCookiesResult =
   | { success: true; cookieFile: string }
   | { success: false; error: string };
@@ -247,6 +254,7 @@ export interface ElectronAPI {
   showItemInFolder: (filePath: string) => Promise<void>;
   checkBinaries: () => Promise<BinaryStatus>;
   updateYtDlp: () => Promise<UpdateYtDlpResult>;
+  checkYtDlpUpdate: () => Promise<CheckYtDlpUpdateResult>;
   exportCookies: (url?: string) => Promise<ExportCookiesResult>;
   loginAndGetCookies: (url: string, domain: string) => Promise<LoginAndGetCookiesResult>;
   clearCookieCache: () => Promise<ClearCookieCacheResult>;

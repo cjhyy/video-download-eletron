@@ -118,6 +118,10 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     return videoHandlers.updateYtDlp();
   }, { timeout: 120000 }); // 更新可能需要较长时间
 
+  ipcRegistry.register(IPCChannels.CHECK_YT_DLP_UPDATE, async () => {
+    return videoHandlers.checkYtDlpUpdate();
+  }, { timeout: 60000 }); // 读本地版本(冷启动慢) + 查 GitHub
+
   ipcRegistry.register(IPCChannels.EXPORT_COOKIES, async (_event, url) => {
     return videoHandlers.exportCookies(url as string | undefined);
   });

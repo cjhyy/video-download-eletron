@@ -37,7 +37,7 @@
   },
   "mac": {
     "target": "dmg",
-    "icon": "assets/icon.icns",
+    "icon": "assets/favicon/icon.icns",
     "artifactName": "${productName}-${version}-lite-${arch}.${ext}"
   },
   "linux": {

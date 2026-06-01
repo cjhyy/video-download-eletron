@@ -68,16 +68,18 @@ export function getBinaryPath(binaryName: string): string {
     return devPath; // 返回预期路径，让调用方处理不存在的情况
   }
 
-  // 在打包后使用 extraResources（完整版）
-  const bundledPath = path.join(process.resourcesPath, 'binaries', platform, binaryName + extension);
-  if (fs.existsSync(bundledPath)) {
-    return bundledPath;
-  }
-
-  // 用户数据目录中的二进制文件（精简版下载后）
+  // 用户数据目录中的二进制文件（精简版下载后，或更新后的较新版本）
+  // 优先于包内 bundled 版本：更新会把最新版下载到此处（可写目录），
+  // 必须盖过打包时内置的旧版，否则更新对完整版用户无效。
   const userDataPath = getUserDataBinaryPath(binaryName);
   if (fs.existsSync(userDataPath)) {
     return userDataPath;
+  }
+
+  // 打包内置的 extraResources（完整版，只读目录）
+  const bundledPath = path.join(process.resourcesPath, 'binaries', platform, binaryName + extension);
+  if (fs.existsSync(bundledPath)) {
+    return bundledPath;
   }
 
   // 回退：尝试从系统 PATH 查找

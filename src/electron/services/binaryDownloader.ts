@@ -258,6 +258,51 @@ export async function downloadBinary(
 }
 
 /**
+ * 查询 GitHub 上 yt-dlp 的最新发布版本号（tag_name）。
+ * 注意：这是唯一会调用 GitHub API 的地方，匿名请求每小时限 60 次，
+ * 触发限流会抛 "HTTP 403"，由调用方降级处理（提示稍后再试，不阻塞）。
+ */
+export function getLatestYtDlpVersion(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const req = https.get(
+      'https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest',
+      { headers: { 'User-Agent': 'video-downloader-app', Accept: 'application/vnd.github+json' } },
+      (response) => {
+        if (response.statusCode !== 200) {
+          // 读完并丢弃响应体，避免 socket 挂起
+          response.resume();
+          reject(new Error(`HTTP ${response.statusCode}`));
+          return;
+        }
+
+        let body = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => {
+          body += chunk;
+        });
+        response.on('end', () => {
+          try {
+            const tag = JSON.parse(body)?.tag_name;
+            if (typeof tag === 'string' && tag.length > 0) {
+              resolve(tag);
+            } else {
+              reject(new Error('无法解析最新版本号'));
+            }
+          } catch (e) {
+            reject(new Error(`解析版本信息失败: ${(e as Error).message}`));
+          }
+        });
+      }
+    );
+
+    req.on('error', reject);
+    req.setTimeout(10000, () => {
+      req.destroy(new Error('查询最新版本超时'));
+    });
+  });
+}
+
+/**
  * 检查二进制文件是否需要下载（不存在于内置或系统路径）
  */
 export function needsDownload(binaryName: BinaryName): boolean {
