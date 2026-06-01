@@ -9,10 +9,12 @@ vi.mock('electron', () => ({
 }));
 
 // Mock child_process so findInSystemPath never hits the real system
+const execFileSyncMock = vi.fn();
 vi.mock('child_process', () => ({
   execSync: vi.fn(() => {
     throw new Error('not found');
   }),
+  execFileSync: (...a: unknown[]) => execFileSyncMock(...a),
 }));
 
 // fs.existsSync is controlled per-test
@@ -21,7 +23,7 @@ vi.mock('fs', () => ({
 }));
 
 import * as fs from 'fs';
-import { getBinaryPath } from '../binaries';
+import { getBinaryPath, removeBinariesQuarantine } from '../binaries';
 
 const PLATFORM = process.platform;
 const EXT = PLATFORM === 'win32' ? '.exe' : '';
@@ -62,5 +64,50 @@ describe('getBinaryPath (生产模式)', () => {
     vi.mocked(fs.existsSync).mockReturnValue(false);
 
     expect(getBinaryPath('yt-dlp')).toBe(userDataPath);
+  });
+});
+
+describe('removeBinariesQuarantine', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('macOS 上对存在的内置 binaries 目录执行 xattr -dr com.apple.quarantine', () => {
+    // 内置目录存在时应处理它
+    const bundledDir = path.join(RESOURCES_PATH, 'binaries');
+    vi.mocked(fs.existsSync).mockImplementation((p) => p === bundledDir);
+
+    removeBinariesQuarantine('darwin');
+
+    expect(execFileSyncMock).toHaveBeenCalled();
+    const [cmd, args] = execFileSyncMock.mock.calls[0];
+    expect(cmd).toBe('xattr');
+    expect(args).toContain('-dr');
+    expect(args).toContain('com.apple.quarantine');
+    expect(args).toContain(bundledDir);
+  });
+
+  it('非 macOS 平台直接跳过，不调用 xattr', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+
+    removeBinariesQuarantine('win32');
+
+    expect(execFileSyncMock).not.toHaveBeenCalled();
+  });
+
+  it('目录不存在时不报错也不调用 xattr', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    expect(() => removeBinariesQuarantine('darwin')).not.toThrow();
+    expect(execFileSyncMock).not.toHaveBeenCalled();
+  });
+
+  it('xattr 抛错时被吞掉，不影响启动', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    execFileSyncMock.mockImplementation(() => {
+      throw new Error('xattr failed');
+    });
+
+    expect(() => removeBinariesQuarantine('darwin')).not.toThrow();
   });
 });

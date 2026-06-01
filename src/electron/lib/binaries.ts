@@ -1,7 +1,7 @@
 import { app } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 
 /**
  * 尝试从系统 PATH 中查找二进制文件
@@ -107,6 +107,46 @@ export function isBundledBinary(binaryName: string): boolean {
 
   const bundledPath = path.join(process.resourcesPath, 'binaries', platform, binaryName + extension);
   return binaryPath === bundledPath && fs.existsSync(bundledPath);
+}
+
+/**
+ * 剥离内置 / 用户数据目录里二进制的 macOS quarantine 属性。
+ *
+ * 从 GitHub release 下载安装的 .app，macOS 会给整个包（含内置 yt-dlp/ffmpeg）
+ * 打上 com.apple.quarantine。从被 quarantine 的 GUI app 内部执行同样被
+ * quarantine 的内置二进制，会被 Gatekeeper 拦截（无法验证开发者），导致
+ * execFile 失败/挂起 —— 表现为读不到版本号、甚至回退到系统 PATH 的旧版。
+ *
+ * 在 app 启动早期对 binaries 目录递归执行 `xattr -dr com.apple.quarantine`，
+ * 即可让内置二进制正常执行。仅 macOS 需要；失败不影响启动（吞掉异常）。
+ *
+ * @param platform 传入以便测试；默认当前平台。
+ */
+export function removeBinariesQuarantine(platform: NodeJS.Platform = process.platform): void {
+  if (platform !== 'darwin') return;
+
+  const dirs: string[] = [];
+  // 内置（完整版，打包在 resources 下）
+  if (process.resourcesPath) {
+    dirs.push(path.join(process.resourcesPath, 'binaries'));
+  }
+  // 用户数据目录（精简版下载 / 更新后）
+  try {
+    dirs.push(path.join(app.getPath('userData'), 'binaries'));
+  } catch {
+    // app 尚未就绪等极端情况，忽略
+  }
+
+  for (const dir of dirs) {
+    if (!fs.existsSync(dir)) continue;
+    try {
+      execFileSync('xattr', ['-dr', 'com.apple.quarantine', dir], { stdio: 'ignore' });
+      console.log(`[binaries] 已剥离 quarantine: ${dir}`);
+    } catch (error) {
+      // 没有 quarantine 属性时 xattr 也可能报错，无害；其它错误一并忽略，不阻塞启动。
+      console.warn(`[binaries] 剥离 quarantine 失败（可忽略）: ${dir}`, (error as Error).message);
+    }
+  }
 }
 
 

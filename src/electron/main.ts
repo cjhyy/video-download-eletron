@@ -5,6 +5,7 @@ import { createMainWindow } from './window/createMainWindow';
 import { createTray } from './window/tray';
 import { configureAppPaths } from './paths';
 import { loadUserSettings } from './lib/userSettings';
+import { removeBinariesQuarantine } from './lib/binaries';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -12,6 +13,10 @@ const getMainWindow = () => mainWindow;
 
 // Ensure cache/userData paths are writable before anything reads userData.
 configureAppPaths();
+
+// macOS: 剥离内置/已下载二进制的 quarantine，否则从下载安装的 app 内执行
+// 内置 yt-dlp/ffmpeg 会被 Gatekeeper 拦截（读不到版本、回退系统旧版）。
+removeBinariesQuarantine();
 
 // Prevent multiple instances from racing on the same cache/userData directory (common cause of 0x5).
 const gotLock = app.requestSingleInstanceLock();
