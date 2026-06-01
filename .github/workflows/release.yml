@@ -54,9 +54,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dist-${{ matrix.os }}
+          # 只取 release/full、release/lite 顶层的安装包；不要 win-unpacked/mac
+          # 等子目录里的 elevate.exe / ffmpeg.exe / 未封装 app exe 等中间产物。
           path: |
-            release/**/*.dmg
-            release/**/*.exe
+            release/*/*.dmg
+            release/*/*.exe
           if-no-files-found: error
           retention-days: 7
 
