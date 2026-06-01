@@ -36,18 +36,19 @@ jobs:
         run: npm run download-binaries
 
       # macOS：同时出 arm64 + x64；afterSign 钩子做 ad-hoc 签名。
+      # --publish never：只构建，不让 electron-builder 自己发布（发布交给 release job）。
       - name: Build (macOS)
         if: matrix.os == 'macos-latest'
         run: |
-          npm run dist:full -- --arm64 --x64
-          npm run dist:lite -- --arm64 --x64
+          npm run dist:full -- --arm64 --x64 --publish never
+          npm run dist:lite -- --arm64 --x64 --publish never
 
       # Windows：默认 x64。
       - name: Build (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          npm run dist:full
-          npm run dist:lite
+          npm run dist:full -- --publish never
+          npm run dist:lite -- --publish never
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
