@@ -1,0 +1,78 @@
+name: Release
+
+# 推送 vX.Y.Z 标签时自动跨平台打包并发布 release。
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write # 创建 release 需要
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false # 一个平台失败不影响另一个继续，便于排查
+      matrix:
+        os: [macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # 拉取当前最新的 yt-dlp / ffmpeg 到 binaries/<os>/，供 full 版内置。
+      - name: Download latest binaries (yt-dlp / ffmpeg)
+        run: npm run download-binaries
+
+      # macOS：同时出 arm64 + x64；afterSign 钩子做 ad-hoc 签名。
+      - name: Build (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          npm run dist:full -- --arm64 --x64
+          npm run dist:lite -- --arm64 --x64
+
+      # Windows：默认 x64。
+      - name: Build (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          npm run dist:full
+          npm run dist:lite
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.os }}
+          path: |
+            release/**/*.dmg
+            release/**/*.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          draft: false
+          generate_release_notes: true
+          files: artifacts/**/*
