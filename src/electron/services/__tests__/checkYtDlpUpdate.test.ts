@@ -14,11 +14,25 @@ vi.mock('fs', () => ({
   readFileSync: vi.fn(),
 }));
 
-const execFileSyncMock = vi.fn();
-vi.mock('child_process', () => ({
-  spawn: vi.fn(),
-  execFileSync: (cmd: string, args: string[], opts: unknown) => execFileSyncMock(cmd, args, opts),
-}));
+import { promisify } from 'util';
+const execFileMock = vi.fn(); // (cmd,args,opts,cb)
+vi.mock('child_process', () => {
+  const execFile = (...a: unknown[]) => (execFileMock as (...x: unknown[]) => unknown)(...a);
+  (execFile as unknown as Record<symbol, unknown>)[promisify.custom] = (cmd: string, args: string[], opts: unknown) =>
+    new Promise((resolve, reject) => {
+      execFileMock(cmd, args, opts, (err: Error | null, stdout: string) => {
+        if (err) reject(err);
+        else resolve({ stdout, stderr: '' });
+      });
+    });
+  return { spawn: vi.fn(), execFile };
+});
+// 设定本地 yt-dlp --version 的输出（通过非阻塞 execFile 的 callback）。
+function setLocalVersion(v: string) {
+  execFileMock.mockImplementation(
+    (_c: string, _a: string[], _o: unknown, cb: (e: Error | null, out: string) => void) => cb(null, v),
+  );
+}
 
 const getLatestYtDlpVersionMock = vi.fn();
 vi.mock('../binaryDownloader', () => ({
@@ -38,7 +52,7 @@ describe('checkYtDlpUpdate', () => {
   });
 
   it('本地版本等于远端最新版 → up-to-date', async () => {
-    execFileSyncMock.mockReturnValue('2026.03.17\n');
+    setLocalVersion('2026.03.17\n');
     getLatestYtDlpVersionMock.mockResolvedValue('2026.03.17');
 
     const r = await checkYtDlpUpdate();
@@ -49,7 +63,7 @@ describe('checkYtDlpUpdate', () => {
   });
 
   it('本地版本落后于远端 → update-available', async () => {
-    execFileSyncMock.mockReturnValue('2026.02.21\n');
+    setLocalVersion('2026.02.21\n');
     getLatestYtDlpVersionMock.mockResolvedValue('2026.03.17');
 
     const r = await checkYtDlpUpdate();
@@ -69,7 +83,7 @@ describe('checkYtDlpUpdate', () => {
   });
 
   it('远端查询失败(403)→ check-failed，但仍带上本地版本，不抛错', async () => {
-    execFileSyncMock.mockReturnValue('2026.02.21\n');
+    setLocalVersion('2026.02.21\n');
     getLatestYtDlpVersionMock.mockRejectedValue(new Error('HTTP 403'));
 
     const r = await checkYtDlpUpdate();

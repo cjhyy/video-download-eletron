@@ -1,5 +1,6 @@
 import { app } from 'electron';
-import { spawn, execFileSync, type ChildProcess } from 'child_process';
+import { spawn, execFile, type ChildProcess } from 'child_process';
+import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
 import type {
@@ -186,21 +187,29 @@ function buildDownloadFailureMessage(stderrTail: string[], exitCode: number | nu
   return { code: 'INTERNAL_ERROR', message: `下载失败（exitCode=${exitCode ?? 'null'}）。请查看任务日志中的 stderrTail。` };
 }
 
-// 获取二进制文件版本号
-// yt-dlp 的 _macos / .exe 独立二进制是 PyInstaller 打包，首次运行需把内嵌的
-// Python 运行时解压到临时目录，冷启动 `--version` 可能耗时 20s+。超时必须足够大，
-// 否则会超时返回 undefined，导致界面版本号空白、「重新检查」像没反应。
+const execFileAsync = promisify(execFile);
+
+// 获取二进制文件版本号。
+// 必须异步、非阻塞：本函数在主进程被 checkBinaries 调用，若用同步 execFileSync，
+// 而 yt-dlp 的 _macos / .exe 独立二进制是 PyInstaller 打包、首次运行需解压内嵌
+// Python 运行时（冷启动 ~24s），会同步阻塞主进程事件循环，导致进设置页/点侧边栏
+// 整个 UI 卡死。改用非阻塞 execFile（promisify）后，等待期间 UI 仍可响应。
+// 超时仍给足冷启动时间，避免误判超时导致版本号空白。
 export const BINARY_VERSION_TIMEOUT_MS = 30000;
 
-export function getBinaryVersion(binaryPath: string, versionArg: string = '--version'): string | undefined {
+export async function getBinaryVersion(
+  binaryPath: string,
+  versionArg: string = '--version',
+): Promise<string | undefined> {
   try {
     if (!fs.existsSync(binaryPath)) return undefined;
 
-    const output = execFileSync(binaryPath, [versionArg], {
+    const { stdout } = await execFileAsync(binaryPath, [versionArg], {
       encoding: 'utf8',
       timeout: BINARY_VERSION_TIMEOUT_MS,
       windowsHide: true,
-    }).trim();
+    });
+    const output = stdout.trim();
 
     // yt-dlp 输出格式: "2024.01.01" 或 "2024.01.01.post1"
     // ffmpeg 输出格式: "ffmpeg version 6.1 ..." 或 "ffmpeg version N-xxxxx-..."
@@ -217,21 +226,21 @@ export function getBinaryVersion(binaryPath: string, versionArg: string = '--ver
   }
 }
 
-export function checkBinaries(): BinaryStatus {
+export async function checkBinaries(): Promise<BinaryStatus> {
   const ytDlpPath = getBinaryPath('yt-dlp');
   const ffmpegPath = getBinaryPath('ffmpeg');
 
   const ytDlpExists = fs.existsSync(ytDlpPath);
   const ffmpegExists = fs.existsSync(ffmpegPath);
 
-  // 获取版本号
+  // 并行读取版本号（各自非阻塞），避免串行等待两次冷启动。
   const versions: { ytDlp?: string; ffmpeg?: string } = {};
-  if (ytDlpExists) {
-    versions.ytDlp = getBinaryVersion(ytDlpPath, '--version');
-  }
-  if (ffmpegExists) {
-    versions.ffmpeg = getBinaryVersion(ffmpegPath, '-version');
-  }
+  const [ytDlpVer, ffmpegVer] = await Promise.all([
+    ytDlpExists ? getBinaryVersion(ytDlpPath, '--version') : Promise.resolve(undefined),
+    ffmpegExists ? getBinaryVersion(ffmpegPath, '-version') : Promise.resolve(undefined),
+  ]);
+  if (ytDlpExists) versions.ytDlp = ytDlpVer;
+  if (ffmpegExists) versions.ffmpeg = ffmpegVer;
 
   return {
     ytDlp: ytDlpExists,
@@ -738,7 +747,7 @@ export async function updateYtDlp(): Promise<UpdateYtDlpResult> {
  */
 export async function checkYtDlpUpdate(): Promise<CheckYtDlpUpdateResult> {
   const ytDlpPath = getBinaryPath('yt-dlp');
-  const current = fs.existsSync(ytDlpPath) ? getBinaryVersion(ytDlpPath, '--version') : undefined;
+  const current = fs.existsSync(ytDlpPath) ? await getBinaryVersion(ytDlpPath, '--version') : undefined;
 
   let latest: string;
   try {

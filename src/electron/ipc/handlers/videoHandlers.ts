@@ -83,8 +83,8 @@ export class VideoHandlers {
   }
 
   /** 检查二进制文件 */
-  checkBinaries(): BinaryStatus {
-    const status = ytdlpCheckBinaries();
+  async checkBinaries(): Promise<BinaryStatus> {
+    const status = await ytdlpCheckBinaries();
     // 添加是否使用内置版本的信息
     return {
       ...status,

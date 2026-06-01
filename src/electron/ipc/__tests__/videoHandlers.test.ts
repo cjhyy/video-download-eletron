@@ -199,7 +199,7 @@ describe('VideoHandlers', () => {
   });
 
   describe('checkBinaries', () => {
-    it('should return binary status with bundled info', () => {
+    it('should return binary status with bundled info', async () => {
       const mockStatus = {
         ytDlp: true,
         ffmpeg: true,
@@ -208,9 +208,9 @@ describe('VideoHandlers', () => {
           ffmpeg: '/usr/local/bin/ffmpeg',
         },
       };
-      vi.mocked(ytdlp.checkBinaries).mockReturnValue(mockStatus);
+      vi.mocked(ytdlp.checkBinaries).mockResolvedValue(mockStatus);
 
-      const result = handlers.checkBinaries();
+      const result = await handlers.checkBinaries();
 
       expect(ytdlp.checkBinaries).toHaveBeenCalled();
       expect(result).toMatchObject(mockStatus);

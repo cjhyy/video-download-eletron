@@ -19,9 +19,11 @@ vi.mock('../binaryDownloader', () => ({
 }));
 
 // spawn must never be called by updateYtDlp anymore.
+// ytdlp.ts 顶层 import 了 execFile（promisify），mock 需提供它。
 const spawnMock = vi.fn();
 vi.mock('child_process', () => ({
   spawn: (...args: unknown[]) => spawnMock(...args),
+  execFile: vi.fn(),
 }));
 
 import { updateYtDlp } from '../ytdlp';
