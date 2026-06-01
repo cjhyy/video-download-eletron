@@ -6,6 +6,7 @@ import * as path from 'path';
 import type {
   BinaryStatus,
   DownloadOptions,
+  DownloadPostProcessOptions,
   DownloadLogLevel,
   DownloadProgress,
   ExportCookiesResult,
@@ -439,6 +440,38 @@ export async function getVideoInfo(params: {
   });
 }
 
+/**
+ * 构造字幕相关的 yt-dlp 参数。
+ *
+ * 关键：字幕是 sidecar 附加项，YouTube 字幕接口容易被限流（HTTP 429）。
+ * yt-dlp 默认把字幕下载失败当致命错误，会导致整个视频任务失败。这里在请求字幕时
+ * 加上 --ignore-errors，使字幕拉取失败（429/网络等）被忽略、视频仍能正常下成。
+ * 该容错仅在用户请求字幕时生效；不请求字幕的下载保持严格报错。
+ */
+export function buildSubtitleArgs(pp: DownloadPostProcessOptions | undefined): string[] {
+  if (!pp || !(pp.writeSubs || pp.writeAutoSubs || pp.embedSubs)) {
+    return [];
+  }
+
+  const args: string[] = ['--write-subs'];
+  if (pp.writeAutoSubs) args.push('--write-auto-subs');
+
+  // Prefer srt for downstream learning workflows
+  args.push('--sub-format', 'vtt', '--convert-subs', 'srt');
+
+  const langs = (pp.subLangs || '').trim();
+  args.push('--sub-langs', langs || 'en.*');
+
+  if (pp.embedSubs) {
+    args.push('--embed-subs');
+  }
+
+  // 字幕失败不连带整个视频任务失败（如字幕接口 429 限流）。
+  args.push('--ignore-errors');
+
+  return args;
+}
+
 export async function downloadVideo(
   options: DownloadOptions,
   callbacks: {
@@ -544,22 +577,8 @@ export async function downloadVideo(
     if (pp?.writeThumbnail) {
       args.push('--write-thumbnail', '--embed-thumbnail');
     }
-    // Subtitle options (sidecar download)
-    if (pp?.writeSubs || pp?.writeAutoSubs || pp?.embedSubs) {
-      // Ensure subs are written if embedding or converting
-      args.push('--write-subs');
-      if (pp?.writeAutoSubs) args.push('--write-auto-subs');
-
-      // Prefer srt for downstream learning workflows
-      args.push('--sub-format', 'vtt', '--convert-subs', 'srt');
-
-      const langs = (pp?.subLangs || '').trim();
-      args.push('--sub-langs', langs || 'en.*');
-
-      if (pp?.embedSubs) {
-        args.push('--embed-subs');
-      }
-    }
+    // Subtitle options (sidecar download). 字幕失败不连带视频失败，见 buildSubtitleArgs。
+    args.push(...buildSubtitleArgs(pp));
 
     args.push('--newline');
     args.push(sanitizedUrl);
