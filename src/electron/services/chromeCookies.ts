@@ -289,6 +289,34 @@ function getMacOSDecryptionKey(browser: SupportedBrowser): Buffer | null {
   }
 }
 
+/**
+ * 剥离 Chrome v130+ 在解密明文前附加的 32 字节 SHA256 域名哈希前缀。
+ *
+ * 新版 Chrome（macOS/Linux）解密后的格式为:
+ *   [32 字节域名哈希(二进制)] + [真正的 cookie 值(可打印文本)]
+ * 旧版 Chrome 没有该前缀，整段就是 cookie 值。
+ *
+ * 判断方式: 若前 32 字节中存在非可打印字节(典型的二进制哈希)，则视为新版格式并剥离；
+ * 否则按旧版处理，直接返回全部内容。这样能同时兼容新旧 Chrome。
+ */
+function stripDomainHashPrefix(decrypted: Buffer): string {
+  if (decrypted.length > 32) {
+    const prefix = decrypted.subarray(0, 32);
+    let hasBinary = false;
+    for (const byte of prefix) {
+      // 可打印 ASCII 范围 0x20-0x7E，其余视为二进制
+      if (byte < 0x20 || byte > 0x7e) {
+        hasBinary = true;
+        break;
+      }
+    }
+    if (hasBinary) {
+      return decrypted.subarray(32).toString('utf8');
+    }
+  }
+  return decrypted.toString('utf8');
+}
+
 function decryptMacOSCookie(encryptedValue: Buffer, key: Buffer): string {
   try {
     // 检查是否为空或太短
@@ -318,7 +346,11 @@ function decryptMacOSCookie(encryptedValue: Buffer, key: Buffer): string {
       decipher.setAutoPadding(true);
 
       const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-      return decrypted.toString('utf8');
+
+      // Chrome v130+ (macOS) 会在解密后的明文前附加 32 字节的 SHA256 域名哈希，
+      // 真正的 cookie 值在其后。旧版本则没有此前缀。
+      // 通过检测前 32 字节是否为非可打印的二进制数据来判断是否需要剥离。
+      return stripDomainHashPrefix(decrypted);
     }
 
     // 未知前缀 - 检查是否为未加密的纯文本
@@ -393,7 +425,8 @@ function decryptLinuxCookie(encryptedValue: Buffer, key: Buffer): string {
       decipher.setAutoPadding(true);
 
       const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-      return decrypted.toString('utf8');
+      // 同 macOS：新版 Chrome 解密明文前附带 32 字节域名哈希，需剥离
+      return stripDomainHashPrefix(decrypted);
     }
 
     return encryptedValue.toString('utf8');
@@ -576,6 +609,14 @@ function toNetscapeFormat(cookies: DecryptedCookie[]): string {
 
   for (const cookie of cookies) {
     if (!cookie.value) continue; // 跳过解密失败的
+
+    // 防御：cookie 值若含 latin-1 无法编码的字符（如 U+FFFD），会导致
+    // yt-dlp 构造 HTTP 头时报 "latin-1 codec can't encode" 而整体失败。
+    // 这类值必定是解密残留的二进制乱码，直接跳过。
+    if (/[^\x00-\xFF]/.test(cookie.value) || cookie.value.includes('�')) {
+      console.warn('[ChromeCookies] 跳过含非法字符的 cookie:', cookie.name);
+      continue;
+    }
 
     const domain = cookie.domain.startsWith('.') ? cookie.domain : '.' + cookie.domain;
     const flag = 'TRUE'; // domain 是否适用于所有子域
