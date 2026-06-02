@@ -254,13 +254,29 @@ export async function downloadBinary(
   const extension = platform === 'win32' ? '.exe' : '';
   const outputPath = path.join(binariesDir, binaryName + extension);
 
-  // 检查是否需要解压
+  // 原子写入：全程只操作临时文件，最后一步才 rename 到 outputPath。
+  // 这样下载/解压途中 outputPath 始终是「旧的可用文件」或不存在，
+  // 绝不会暴露半成品 —— 即便用户在下载中途点「重新检查」spawn 该文件，
+  // 拿到的也是完整旧版而非截断的坏文件（spawn 截断文件会报 -88/EBADMACHO）。
   const isGzip = url.endsWith('.gz');
-  const downloadPath = isGzip ? outputPath + '.gz' : outputPath;
+  const tmpPath = outputPath + '.download';      // 最终产物的临时名（rename 来源）
+  const gzPath = tmpPath + '.gz';                // gzip 下载的中转文件
+  const downloadPath = isGzip ? gzPath : tmpPath;
+
+  const cleanupTemps = () => {
+    for (const p of [gzPath, tmpPath]) {
+      if (fs.existsSync(p)) {
+        try { fs.unlinkSync(p); } catch { /* 清理失败无害，忽略 */ }
+      }
+    }
+  };
 
   try {
     console.log(`[binaryDownloader] Downloading ${binaryName} from ${url}`);
     console.log(`[binaryDownloader] Save to: ${outputPath}`);
+
+    // 起步先清掉可能残留的上次失败临时文件，避免脏数据。
+    cleanupTemps();
 
     await downloadFile(url, downloadPath, (progress) => {
       onProgress?.({
@@ -269,26 +285,24 @@ export async function downloadBinary(
       });
     });
 
-    // 解压 gzip
+    // 解压 gzip：gz → tmpPath
     if (isGzip) {
       console.log(`[binaryDownloader] Extracting ${downloadPath}`);
-      await extractGzip(downloadPath, outputPath);
+      await extractGzip(downloadPath, tmpPath);
     }
 
-    // 设置可执行权限
-    setExecutable(outputPath);
+    // 先给临时文件设可执行权限，再原子替换 —— rename 后 outputPath 立即可用。
+    setExecutable(tmpPath);
+    fs.renameSync(tmpPath, outputPath);
+    cleanupTemps(); // 清掉残留的 .gz 中转文件
 
     console.log(`[binaryDownloader] Successfully downloaded ${binaryName}`);
     return { success: true, path: outputPath };
   } catch (error) {
     console.error(`[binaryDownloader] Failed to download ${binaryName}:`, error);
-    // 清理失败的下载
-    if (fs.existsSync(downloadPath)) {
-      fs.unlinkSync(downloadPath);
-    }
-    if (fs.existsSync(outputPath)) {
-      fs.unlinkSync(outputPath);
-    }
+    // 只清理临时文件，绝不删 outputPath：
+    // 更新失败时必须保留既有可用版本，否则一次失败的更新会把好文件也删掉。
+    cleanupTemps();
     return { success: false, error: (error as Error).message };
   }
 }

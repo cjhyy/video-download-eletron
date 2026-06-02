@@ -24,10 +24,11 @@ vi.mock('fs', () => ({
   existsSync: vi.fn(() => false),
   statSync: vi.fn(() => ({ mode: 0o644 })),
   chmodSync: vi.fn(),
+  unlinkSync: vi.fn(),
 }));
 
 import * as fs from 'fs';
-import { getBinaryPath, removeBinariesQuarantine } from '../binaries';
+import { getBinaryPath, removeBinariesQuarantine, sweepCorruptUserDataBinaries } from '../binaries';
 
 const PLATFORM = process.platform;
 const EXT = PLATFORM === 'win32' ? '.exe' : '';
@@ -132,5 +133,60 @@ describe('removeBinariesQuarantine', () => {
     });
 
     expect(() => removeBinariesQuarantine('darwin')).not.toThrow();
+  });
+});
+
+describe('sweepCorruptUserDataBinaries', () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+  const userDataBinDir = path.join('/mock/userData', 'binaries', PLATFORM);
+  const ytDlpUserData = path.join(userDataBinDir, 'yt-dlp' + EXT);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.NODE_ENV = 'production'; // sweep 仅在非开发模式生效
+    vi.mocked(fs.statSync).mockReturnValue({ mode: 0o755 } as unknown as fs.Stats);
+  });
+
+  afterEach(() => {
+    process.env.NODE_ENV = originalNodeEnv;
+  });
+
+  it('下载版二进制损坏（自检抛错）时删除它，使其回退内置版', () => {
+    // userData 目录与 yt-dlp 存在；ffmpeg 不存在
+    vi.mocked(fs.existsSync).mockImplementation((p) => p === userDataBinDir || p === ytDlpUserData);
+    execFileSyncMock.mockImplementation(() => {
+      throw new Error('spawn EBADMACHO'); // 自检失败 = 文件损坏
+    });
+
+    sweepCorruptUserDataBinaries();
+
+    expect(fs.unlinkSync).toHaveBeenCalledWith(ytDlpUserData);
+  });
+
+  it('下载版二进制可执行（自检通过）时保留，不删除', () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => p === userDataBinDir || p === ytDlpUserData);
+    execFileSyncMock.mockReturnValue(Buffer.from('2024.01.01')); // 自检成功
+
+    sweepCorruptUserDataBinaries();
+
+    expect(fs.unlinkSync).not.toHaveBeenCalled();
+  });
+
+  it('userData 目录不存在时直接返回，不自检不删除', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    sweepCorruptUserDataBinaries();
+
+    expect(execFileSyncMock).not.toHaveBeenCalled();
+    expect(fs.unlinkSync).not.toHaveBeenCalled();
+  });
+
+  it('开发模式下直接跳过', () => {
+    process.env.NODE_ENV = 'development';
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+
+    sweepCorruptUserDataBinaries();
+
+    expect(execFileSyncMock).not.toHaveBeenCalled();
   });
 });

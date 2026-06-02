@@ -5,7 +5,7 @@ import { createMainWindow } from './window/createMainWindow';
 import { createTray } from './window/tray';
 import { configureAppPaths } from './paths';
 import { loadUserSettings } from './lib/userSettings';
-import { removeBinariesQuarantine } from './lib/binaries';
+import { removeBinariesQuarantine, sweepCorruptUserDataBinaries } from './lib/binaries';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -17,6 +17,10 @@ configureAppPaths();
 // macOS: 剥离内置/已下载二进制的 quarantine，否则从下载安装的 app 内执行
 // 内置 yt-dlp/ffmpeg 会被 Gatekeeper 拦截（读不到版本、回退系统旧版）。
 removeBinariesQuarantine();
+
+// 清理 userData 里损坏/不可执行的下载版二进制（多为旧版本更新遗留），
+// 使其回退到内置好版。让从旧版升级的用户无需手动点「修复组件」即恢复可用。
+sweepCorruptUserDataBinaries();
 
 // Prevent multiple instances from racing on the same cache/userData directory (common cause of 0x5).
 const gotLock = app.requestSingleInstanceLock();

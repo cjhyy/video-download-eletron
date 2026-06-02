@@ -30,6 +30,7 @@ vi.mock('fs', () => ({
   chmodSync: (...a: unknown[]) => chmodSyncMock(...a),
   mkdirSync: (...a: unknown[]) => mkdirSyncMock(...a),
   unlinkSync: (...a: unknown[]) => unlinkSyncMock(...a),
+  renameSync: vi.fn(),
   statSync: (...a: unknown[]) => statSyncMock(...a),
   createWriteStream: vi.fn(),
   createReadStream: vi.fn(),

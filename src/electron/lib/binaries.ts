@@ -177,6 +177,60 @@ export function removeBinariesQuarantine(platform: NodeJS.Platform = process.pla
   }
 }
 
+/**
+ * 启动时清理 userData 里损坏 / 不可执行的下载版二进制，使其回退到内置好版。
+ *
+ * 背景：getBinaryPath 中 userData（下载/更新版）优先级高于内置版。旧版本（1.1.5 及之前）
+ * 的更新流程可能在 userData 留下损坏 / 截断 / 无权限的文件，升级到新版后它仍会盖过
+ * 内置好版，spawn 时报 EACCES / -88（EBADMACHO），用户表现为「获取信息失败」。
+ *
+ * 这里在启动早期对 userData 下的 yt-dlp/ffmpeg 各跑一次版本自检：
+ *  - 能执行 → 保留（正常的较新下载版）。
+ *  - 不能执行（损坏/无权限，且 ensureExecutable 也补不好）→ 删除，
+ *    使 getBinaryPath 自动回退到内置版。升级用户无需手动点「修复组件」。
+ *
+ * 仅校验 userData 版，绝不动只读的内置版。同步实现（execFileSync）以便在 app ready 前
+ * 完成，调用方失败一律吞掉、不阻塞启动。仅生产模式有意义（开发模式用本地 binaries）。
+ */
+export function sweepCorruptUserDataBinaries(): void {
+  if (process.env.NODE_ENV === 'development' || process.argv.includes('--dev')) return;
+
+  let userDataBinDir: string;
+  try {
+    userDataBinDir = path.join(app.getPath('userData'), 'binaries', process.platform);
+  } catch {
+    return; // app 尚未就绪等极端情况
+  }
+  if (!fs.existsSync(userDataBinDir)) return;
+
+  const extension = process.platform === 'win32' ? '.exe' : '';
+  const targets: Array<{ name: string; arg: string }> = [
+    { name: 'yt-dlp', arg: '--version' },
+    { name: 'ffmpeg', arg: '-version' },
+  ];
+
+  for (const { name, arg } of targets) {
+    const filePath = path.join(userDataBinDir, name + extension);
+    if (!fs.existsSync(filePath)) continue;
+
+    // 先尽量补执行位，再自检；自检通过即保留。
+    ensureExecutable(filePath);
+    try {
+      execFileSync(filePath, [arg], { stdio: 'ignore', timeout: 10000, windowsHide: true });
+      continue; // 可执行，保留
+    } catch {
+      // 损坏 / 架构不符 / 仍无权限：删除，回退到内置版。
+    }
+
+    try {
+      fs.unlinkSync(filePath);
+      console.warn(`[binaries] 已清理损坏的下载版二进制，回退内置版: ${filePath}`);
+    } catch (error) {
+      console.warn(`[binaries] 清理损坏二进制失败（可忽略）: ${filePath}`, (error as Error).message);
+    }
+  }
+}
+
 
 
 
