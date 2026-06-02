@@ -15,9 +15,11 @@ vi.mock('electron', () => ({
 
 const existsSyncMock = vi.fn();
 const unlinkSyncMock = vi.fn();
+const renameSyncMock = vi.fn();
 vi.mock('fs', () => ({
   existsSync: (...a: unknown[]) => existsSyncMock(...a),
   unlinkSync: (...a: unknown[]) => unlinkSyncMock(...a),
+  renameSync: (...a: unknown[]) => renameSyncMock(...a),
   chmodSync: vi.fn(),
   mkdirSync: vi.fn(),
   statSync: vi.fn(() => ({ mode: 0o644 })),
@@ -92,5 +94,26 @@ describe('downloadBinary 完整性校验', () => {
     const result = await downloadBinary('yt-dlp');
 
     expect(result.success).toBe(true);
+  });
+
+  it('成功时应原子替换：先写临时文件再 rename 到最终路径', async () => {
+    wireDownload(100, 100);
+
+    const result = await downloadBinary('yt-dlp');
+
+    expect(result.success).toBe(true);
+    // rename 的来源必须是 .download 临时文件，目标是最终路径 —— 证明全程未直写最终文件。
+    expect(renameSyncMock).toHaveBeenCalledTimes(1);
+    const [from, to] = renameSyncMock.mock.calls[0];
+    expect(String(from)).toContain('.download');
+    expect(String(to)).not.toContain('.download');
+  });
+
+  it('截断失败时不应 rename（最终文件不被半成品覆盖）', async () => {
+    wireDownload(100, 40);
+
+    await downloadBinary('yt-dlp');
+
+    expect(renameSyncMock).not.toHaveBeenCalled();
   });
 });
