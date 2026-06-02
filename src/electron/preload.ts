@@ -138,6 +138,10 @@ const electronAPI: ElectronAPI = {
   downloadBinary: (binaryName: BinaryName) =>
     ipcRenderer.invoke(IPCChannels.DOWNLOAD_BINARY, binaryName),
 
+  // 修复二进制文件权限（补 chmod，不行回退重下）
+  repairBinary: (binaryName: BinaryName) =>
+    ipcRenderer.invoke(IPCChannels.REPAIR_BINARY, binaryName),
+
   // 监听二进制文件下载进度
   onDownloadBinaryProgress: (callback: (progress: DownloadBinaryProgress) => void): void => {
     ipcRenderer.on(IPCChannels.DOWNLOAD_BINARY_PROGRESS, (_event, progress: DownloadBinaryProgress) =>

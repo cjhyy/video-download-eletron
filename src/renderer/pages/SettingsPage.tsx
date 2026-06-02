@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle2, Download, FolderOpen, RefreshCcw, XCircle, Plus as PlusIcon, Minus as MinusIcon } from 'lucide-react';
+import { CheckCircle2, Download, FolderOpen, RefreshCcw, Wrench, XCircle, Plus as PlusIcon, Minus as MinusIcon } from 'lucide-react';
 import type { BinaryName, DownloadBinaryProgress } from '@/shared/electron';
 import { useConfigStore } from '@renderer/store/configStore';
 import { Alert, AlertDescription, AlertTitle } from '@renderer/components/ui/alert';
@@ -48,6 +48,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ hideTitle, section }) => {
   const [updating, setUpdating] = useState(false);
   const [checking, setChecking] = useState(false);
   const [downloading, setDownloading] = useState<{ ytDlp: boolean; ffmpeg: boolean }>({ ytDlp: false, ffmpeg: false });
+  const [repairing, setRepairing] = useState<{ ytDlp: boolean; ffmpeg: boolean }>({ ytDlp: false, ffmpeg: false });
   const [downloadProgress, setDownloadProgress] = useState<{ ytDlp: number; ffmpeg: number }>({ ytDlp: 0, ffmpeg: 0 });
   const [ytdlpArgsText, setYtdlpArgsText] = useState<string>('');
   const [ytdlpArgsLoading, setYtdlpArgsLoading] = useState<boolean>(false);
@@ -241,6 +242,33 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ hideTitle, section }) => {
     }
   };
 
+  // 「修复权限」：补可执行权限，补不好（文件损坏/半成品）自动回退重新下载。
+  // 用于二进制存在但 spawn 报 EACCES 的情况（更新中断、旧版遗留、卷权限被重置等）。
+  const handleRepairBinary = async (binaryName: BinaryName) => {
+    const key = binaryName === 'yt-dlp' ? 'ytDlp' : 'ffmpeg';
+    setRepairing((prev) => ({ ...prev, [key]: true }));
+    setDownloadProgress((prev) => ({ ...prev, [key]: 0 }));
+
+    try {
+      const result = await window.electronAPI.repairBinary(binaryName);
+      if (result.success) {
+        toast.success(
+          result.method === 'chmod'
+            ? `${binaryName} 权限已修复！`
+            : `${binaryName} 已重新下载并修复！`,
+        );
+        await checkBinaries();
+      } else {
+        toast.error(`修复失败: ${'error' in result ? result.error : '未知错误'}`);
+      }
+    } catch (error: any) {
+      toast.error(`修复失败: ${error.message}`);
+    } finally {
+      setRepairing((prev) => ({ ...prev, [key]: false }));
+      setDownloadProgress((prev) => ({ ...prev, [key]: 0 }));
+    }
+  };
+
   const handleToggleGpuCompat = async (enabled: boolean) => {
     updateConfig({ gpuCompatEnabled: enabled });
     try {
@@ -387,6 +415,19 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ hideTitle, section }) => {
                       {downloading.ytDlp ? `下载中 ${downloadProgress.ytDlp}%` : '下载 yt-dlp'}
                     </Button>
                   )}
+                  {binaryStatus?.ytDlp && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="mt-2 gap-2"
+                      disabled={repairing.ytDlp}
+                      onClick={() => handleRepairBinary('yt-dlp')}
+                      title="无法启动 / EACCES 时，补可执行权限；补不好则自动重新下载"
+                    >
+                      <Wrench className={cn("h-4 w-4", repairing.ytDlp && "animate-pulse")} />
+                      {repairing.ytDlp ? '修复中…' : '修复组件'}
+                    </Button>
+                  )}
                 </div>
 
                 <div className="flex flex-col justify-between gap-2 rounded-lg border p-4">
@@ -414,6 +455,19 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ hideTitle, section }) => {
                     >
                       <Download className={cn("h-4 w-4", downloading.ffmpeg && "animate-pulse")} />
                       {downloading.ffmpeg ? `下载中 ${downloadProgress.ffmpeg}%` : '下载 ffmpeg'}
+                    </Button>
+                  )}
+                  {binaryStatus?.ffmpeg && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="mt-2 gap-2"
+                      disabled={repairing.ffmpeg}
+                      onClick={() => handleRepairBinary('ffmpeg')}
+                      title="无法启动 / EACCES 时，补可执行权限；补不好则自动重新下载"
+                    >
+                      <Wrench className={cn("h-4 w-4", repairing.ffmpeg && "animate-pulse")} />
+                      {repairing.ffmpeg ? '修复中…' : '修复组件'}
                     </Button>
                   )}
                 </div>

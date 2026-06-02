@@ -177,6 +177,10 @@ export type DownloadBinaryResult =
   | { success: true; path: string }
   | { success: false; error: string };
 
+export type RepairBinaryResult =
+  | { success: true; path: string; method: 'chmod' | 'redownload' }
+  | { success: false; error: string };
+
 export type CopyCookieFileResult =
   | { success: true; cookieFile: string }
   | { success: false; error: string };
@@ -273,6 +277,7 @@ export interface ElectronAPI {
   bilibiliCheckQRStatus: (qrKey: string) => Promise<BilibiliQRStatusResult>;
   // 下载二进制文件（精简版）
   downloadBinary: (binaryName: BinaryName) => Promise<DownloadBinaryResult>;
+  repairBinary: (binaryName: BinaryName) => Promise<RepairBinaryResult>;
   onDownloadBinaryProgress: (callback: (progress: DownloadBinaryProgress) => void) => void;
 }
 

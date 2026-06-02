@@ -182,5 +182,12 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     });
   }, { timeout: 300000 }); // 下载超时 5 分钟
 
+  ipcRegistry.register(IPCChannels.REPAIR_BINARY, async (event, binaryName) => {
+    // 复用下载进度事件：修复若回退到重新下载，前端可沿用既有进度条。
+    return videoHandlers.repairBinary(binaryName as BinaryName, (progress) => {
+      event.sender.send(IPCChannels.DOWNLOAD_BINARY_PROGRESS, progress);
+    });
+  }, { timeout: 300000 }); // 可能含重新下载，超时 5 分钟
+
   console.log(`[IPC] Registered ${ipcRegistry.getAllChannels().length} handlers`);
 }

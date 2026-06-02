@@ -3,6 +3,7 @@ import type {
   BinaryStatus,
   DownloadBinaryProgress,
   DownloadBinaryResult,
+  RepairBinaryResult,
   DownloadOptions,
   DownloadProgress,
   ExportCookiesResult,
@@ -29,7 +30,7 @@ import {
   checkYtDlpUpdate as ytdlpCheckYtDlpUpdate,
   exportCookies as ytdlpExportCookies,
 } from '../../services/ytdlp';
-import { downloadBinary } from '../../services/binaryDownloader';
+import { downloadBinary, repairBinary } from '../../services/binaryDownloader';
 import { isBundledBinary } from '../../lib/binaries';
 
 /**
@@ -104,6 +105,17 @@ export class VideoHandlers {
       return { success: false, error: `Unknown binary: ${binaryName}` };
     }
     return downloadBinary(binaryName, onProgress);
+  }
+
+  /** 修复二进制文件权限（补 chmod，不行回退重下） */
+  async repairBinary(
+    binaryName: BinaryName,
+    onProgress?: (progress: DownloadBinaryProgress) => void
+  ): Promise<RepairBinaryResult> {
+    if (binaryName !== 'yt-dlp' && binaryName !== 'ffmpeg') {
+      return { success: false, error: `Unknown binary: ${binaryName}` };
+    }
+    return repairBinary(binaryName, onProgress);
   }
 
   /** 更新 yt-dlp */

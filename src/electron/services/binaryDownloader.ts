@@ -2,7 +2,8 @@ import { app } from 'electron';
 import * as https from 'https';
 import * as fs from 'fs';
 import * as path from 'path';
-import { execSync } from 'child_process';
+import { execFile } from 'child_process';
+import { getBinaryPath } from '../lib/binaries';
 
 export type BinaryName = 'yt-dlp' | 'ffmpeg';
 
@@ -15,6 +16,10 @@ export interface DownloadBinaryProgress {
 
 export type DownloadBinaryResult =
   | { success: true; path: string }
+  | { success: false; error: string };
+
+export type RepairBinaryResult =
+  | { success: true; path: string; method: 'chmod' | 'redownload' }
   | { success: false; error: string };
 
 // GitHub 下载 URL 配置
@@ -127,10 +132,42 @@ function downloadFile(
           }
         });
 
+        // 连接在传输途中断开（response 流自身报错）：必须显式处理。
+        // 否则 pipe 提前结束只触发 file 的 'finish'/'close'，半截文件会被当成功返回，
+        // 落地一个被截断的二进制 —— spawn 时报 EBADMACHO（errno 88）。
+        response.on('error', (err) => {
+          file.destroy();
+          if (fs.existsSync(outputPath)) {
+            fs.unlinkSync(outputPath);
+          }
+          reject(err);
+        });
+
         response.pipe(file);
 
+        // 'finish' 仅表示数据已交给内核，文件描述符可能尚未真正关闭。
+        // 必须等 'close' 再 resolve，否则随后的 chmodSync 与 fd 关闭存在竞态，
+        // 可能导致执行位漏设、spawn 报 EACCES（本次修复的根因之一）。
         file.on('finish', () => {
           file.close();
+        });
+
+        file.on('close', () => {
+          // 完整性校验：服务器声明了 Content-Length 时，落地字节数必须一致。
+          // 不一致 = 下载被截断（连接中途断开 / 服务器提前 EOF），文件是损坏的
+          // 半成品，决不能当成功返回 —— 删掉并报错，交由上层重试 / 提示用户。
+          // 这是 spawn 报 EBADMACHO（errno 88，「Mach-O 文件损坏」）的根因。
+          if (totalBytes > 0 && downloadedBytes !== totalBytes) {
+            if (fs.existsSync(outputPath)) {
+              fs.unlinkSync(outputPath);
+            }
+            reject(
+              new Error(
+                `下载不完整：预期 ${totalBytes} 字节，实际收到 ${downloadedBytes} 字节（连接可能中断，请重试）`
+              )
+            );
+            return;
+          }
           resolve();
         });
 
@@ -178,17 +215,16 @@ async function extractGzip(gzPath: string, outputPath: string): Promise<void> {
 }
 
 /**
- * 设置文件为可执行
+ * 设置文件为可执行。
+ *
+ * 用 fs.chmodSync 直接设权限（不经过 shell，避免路径含空格/特殊字符时拼接出错），
+ * 失败时抛出而非吞掉：可执行位漏设会导致后续 spawn 报 EACCES，
+ * 与其报告「下载成功」却留下一个不可用的二进制，不如让下载整体失败、提示用户重试。
  */
 function setExecutable(filePath: string): void {
-  if (process.platform !== 'win32') {
-    try {
-      execSync(`chmod +x "${filePath}"`);
-      console.log(`[binaryDownloader] Set executable: ${filePath}`);
-    } catch (error) {
-      console.warn(`[binaryDownloader] Failed to set executable: ${(error as Error).message}`);
-    }
-  }
+  if (process.platform === 'win32') return;
+  fs.chmodSync(filePath, 0o755);
+  console.log(`[binaryDownloader] Set executable: ${filePath}`);
 }
 
 /**
@@ -255,6 +291,75 @@ export async function downloadBinary(
     }
     return { success: false, error: (error as Error).message };
   }
+}
+
+/**
+ * 实际执行一次二进制自检：spawn 该文件跑版本参数，能正常退出才算「真正可用」。
+ *
+ * 仅 chmod 成功并不代表文件可用——更新中断留下的半成品文件 chmod 也会成功，
+ * 但执行时仍会失败。因此修复后必须真跑一次，据此决定是否回退到重新下载。
+ */
+function canExecute(binaryName: BinaryName, filePath: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const versionArg = binaryName === 'yt-dlp' ? '--version' : '-version';
+    execFile(filePath, [versionArg], { timeout: 10000 }, (error) => {
+      resolve(!error);
+    });
+  });
+}
+
+/**
+ * 修复二进制：优先补可执行权限，补不好（文件损坏/半成品）再回退重新下载。
+ *
+ * 触发场景：更新/下载把文件落到 userData（getBinaryPath 中优先级高于内置版），
+ * 若该文件丢失执行位（更新中断、旧版本 chmod 失败遗留、卷权限被重置等），
+ * spawn 时报 EACCES，对用户表现为「获取信息失败 / 无法启动」且无自助入口。
+ *
+ * 策略（先 chmod，不行再重下）：
+ *  1. 文件不存在 → 无可修，直接走 downloadBinary（等价于安装）。
+ *  2. 文件存在 → chmod 0o755，再 spawn 自检。自检通过 → method:'chmod'。
+ *  3. 自检失败（损坏/半成品）→ 回退 downloadBinary → method:'redownload'。
+ */
+export async function repairBinary(
+  binaryName: BinaryName,
+  onProgress?: (progress: DownloadBinaryProgress) => void
+): Promise<RepairBinaryResult> {
+  const filePath = getBinaryPath(binaryName);
+
+  // 回退重新下载，并把 DownloadBinaryResult 映射为 RepairBinaryResult。
+  // strictNullChecks 关闭，判别式联合不会自动收窄，显式取出 error 字段（与 updateYtDlp 一致）。
+  const redownload = async (): Promise<RepairBinaryResult> => {
+    const result = await downloadBinary(binaryName, onProgress);
+    if (result.success) {
+      return { success: true, path: result.path, method: 'redownload' };
+    }
+    return { success: false, error: (result as { error: string }).error };
+  };
+
+  // 文件不存在：没有可修的对象，直接下载安装。
+  if (!fs.existsSync(filePath)) {
+    console.log(`[binaryDownloader] repair: ${binaryName} 不存在，转为下载: ${filePath}`);
+    return redownload();
+  }
+
+  // 先尝试补可执行权限。
+  try {
+    setExecutable(filePath);
+  } catch (error) {
+    // chmod 本身失败（只读卷 / 权限不足等）：记录后继续走自检，
+    // 自检大概率失败从而回退重下，由下载落到可写的 userData 目录。
+    console.warn(`[binaryDownloader] repair: chmod 失败，将尝试重新下载: ${filePath}`, (error as Error).message);
+  }
+
+  // 自检：chmod 成功 ≠ 文件可用，必须真跑一次。
+  if (await canExecute(binaryName, filePath)) {
+    console.log(`[binaryDownloader] repair: ${binaryName} 补权限后可用: ${filePath}`);
+    return { success: true, path: filePath, method: 'chmod' };
+  }
+
+  // 自检失败：文件损坏或半成品，回退重新下载。
+  console.warn(`[binaryDownloader] repair: ${binaryName} 自检失败，回退重新下载`);
+  return redownload();
 }
 
 /**

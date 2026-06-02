@@ -43,6 +43,31 @@ function getUserDataBinaryPath(binaryName: string): string {
 }
 
 /**
+ * 确保 macOS / Linux 上的二进制文件具备可执行权限。
+ *
+ * 背景：下载落地（binaryDownloader）只在下载时 chmod 一次，且失败被吞掉，
+ * 一旦 chmod 漏设（chmod 失败、被其它机制拷贝、旧版本遗留等），spawn 该文件
+ * 就会报 EACCES，对用户表现为「获取信息失败 [UNKNOWN]」这类无从下手的错误。
+ *
+ * 这里在 getBinaryPath 返回路径前重新校正一次权限：若文件已可执行则无副作用，
+ * 若缺失执行位则补上（0o755）。read-only 卷（如内置 resources）chmod 可能失败，
+ * 但内置二进制本身已带执行位，失败无害，因此吞掉异常不阻塞。仅类 Unix 需要。
+ */
+function ensureExecutable(filePath: string): void {
+  if (process.platform === 'win32') return;
+  try {
+    const stat = fs.statSync(filePath);
+    // 已带「所有者可执行」位（0o100）则无需处理，避免不必要的 chmod 系统调用。
+    if (stat.mode & 0o100) return;
+    fs.chmodSync(filePath, stat.mode | 0o755);
+    console.log(`[binaries] 已补齐可执行权限: ${filePath}`);
+  } catch (error) {
+    // 文件不存在 / read-only 卷等：交由调用方的 existsSync 检查处理，此处不阻塞。
+    console.warn(`[binaries] 补齐可执行权限失败（可忽略）: ${filePath}`, (error as Error).message);
+  }
+}
+
+/**
  * 获取二进制文件路径
  * 优先级：
  * 1. 开发模式：本地 binaries 文件夹
@@ -58,6 +83,7 @@ export function getBinaryPath(binaryName: string): string {
   if (process.env.NODE_ENV === 'development' || process.argv.includes('--dev')) {
     const devPath = path.join(__dirname, '..', 'binaries', platform, binaryName + extension);
     if (fs.existsSync(devPath)) {
+      ensureExecutable(devPath);
       return devPath;
     }
     // 开发模式下如果本地没有，也尝试系统 PATH
@@ -73,12 +99,14 @@ export function getBinaryPath(binaryName: string): string {
   // 必须盖过打包时内置的旧版，否则更新对完整版用户无效。
   const userDataPath = getUserDataBinaryPath(binaryName);
   if (fs.existsSync(userDataPath)) {
+    ensureExecutable(userDataPath);
     return userDataPath;
   }
 
   // 打包内置的 extraResources（完整版，只读目录）
   const bundledPath = path.join(process.resourcesPath, 'binaries', platform, binaryName + extension);
   if (fs.existsSync(bundledPath)) {
+    ensureExecutable(bundledPath);
     return bundledPath;
   }
 

@@ -17,9 +17,13 @@ vi.mock('child_process', () => ({
   execFileSync: (...a: unknown[]) => execFileSyncMock(...a),
 }));
 
-// fs.existsSync is controlled per-test
+// fs.existsSync is controlled per-test.
+// statSync/chmodSync back ensureExecutable: statSync reports a non-executable mode
+// by default so we can assert getBinaryPath repairs the exec bit before returning.
 vi.mock('fs', () => ({
   existsSync: vi.fn(() => false),
+  statSync: vi.fn(() => ({ mode: 0o644 })),
+  chmodSync: vi.fn(),
 }));
 
 import * as fs from 'fs';
@@ -64,6 +68,25 @@ describe('getBinaryPath (生产模式)', () => {
     vi.mocked(fs.existsSync).mockReturnValue(false);
 
     expect(getBinaryPath('yt-dlp')).toBe(userDataPath);
+  });
+
+  it('返回缺少执行位的二进制前，应补齐可执行权限（修复 EACCES）', () => {
+    if (PLATFORM === 'win32') return; // Windows 不涉及执行位
+    vi.mocked(fs.existsSync).mockImplementation((p) => p === userDataPath);
+    vi.mocked(fs.statSync).mockReturnValue({ mode: 0o644 } as unknown as fs.Stats);
+
+    expect(getBinaryPath('yt-dlp')).toBe(userDataPath);
+    // 补上 owner/group/other 执行位
+    expect(fs.chmodSync).toHaveBeenCalledWith(userDataPath, 0o644 | 0o755);
+  });
+
+  it('二进制已可执行时不应重复 chmod', () => {
+    if (PLATFORM === 'win32') return;
+    vi.mocked(fs.existsSync).mockImplementation((p) => p === userDataPath);
+    vi.mocked(fs.statSync).mockReturnValue({ mode: 0o755 } as unknown as fs.Stats);
+
+    expect(getBinaryPath('yt-dlp')).toBe(userDataPath);
+    expect(fs.chmodSync).not.toHaveBeenCalled();
   });
 });
 
