@@ -251,6 +251,31 @@ export async function checkBinaries(): Promise<BinaryStatus> {
   };
 }
 
+/**
+ * 把 child_process spawn 的底层错误（EACCES / ENOENT / EBADMACHO 等）翻译成
+ * 用户能据此操作的中文提示。
+ *
+ * macOS 的 EBADMACHO(88)/EBADARCH(86)/EBADEXEC(85) 表示文件存在且有执行权限，
+ * 但二进制本身损坏 / 架构不符 / 不可执行 —— 几乎都是「下载没下完被截断」的半成品。
+ * Node 在 macOS 上不会给这些错误命名 code（只报 "Unknown system error -88"），
+ * 因此这里用 errno 数值匹配。修复入口统一指向「设置 → 修复组件」（会重新下载）。
+ */
+export function describeSpawnError(binaryName: string, binaryPath: string, error: NodeJS.ErrnoException): string {
+  // 文件损坏 / 架构不符 / 不可执行：基本都是下载被截断的半成品，需重新下载。
+  if (error.errno === -88 || error.errno === -86 || error.errno === -85) {
+    return `${binaryName} 文件已损坏或不完整（很可能是下载未完成）。请到「设置 → 组件状态」点击「修复组件」重新下载。`;
+  }
+
+  switch (error.code) {
+    case 'EACCES':
+      return `${binaryName} 没有可执行权限，无法启动。请到「设置 → 组件状态」点击「修复组件」按钮，或手动执行：chmod +x "${binaryPath}"`;
+    case 'ENOENT':
+      return `未找到 ${binaryName}，请先在「设置」中下载该组件。`;
+    default:
+      return `无法启动 ${binaryName}：${error.message}`;
+  }
+}
+
 export async function getVideoInfo(params: {
   url: string;
   useBrowserCookies?: boolean;
@@ -419,12 +444,11 @@ export async function getVideoInfo(params: {
       }
     });
 
-    childProcess.on('error', (error: Error) => {
+    childProcess.on('error', (error: NodeJS.ErrnoException) => {
       const endTime = Date.now();
       const duration = endTime - startTime;
-      const errorMsg = `Failed to start yt-dlp after ${duration}ms: ${error.message}`;
-      console.error(`[${new Date().toLocaleTimeString()}] ${errorMsg}`);
-      reject(new Error(errorMsg));
+      console.error(`[${new Date().toLocaleTimeString()}] Failed to start yt-dlp after ${duration}ms: ${error.message}`);
+      reject(new Error(describeSpawnError('yt-dlp', ytDlpPath, error)));
     });
 
     const timeoutMs = (config.timeouts?.getVideoInfo ?? 30) * 1000;
@@ -714,10 +738,10 @@ export async function downloadVideo(
       }
     });
 
-    childProcess.on('error', (error: Error) => {
+    childProcess.on('error', (error: NodeJS.ErrnoException) => {
       if (taskId) activeDownloads.delete(taskId);
       callbacks.onLog?.('error', `yt-dlp spawn error: ${error.message}`);
-      reject(new Error(`Failed to start download: ${error.message}`));
+      reject(new Error(describeSpawnError('yt-dlp', ytDlpPath, error)));
     });
   });
 }
@@ -834,9 +858,9 @@ export async function exportCookies(params?: { url?: string }): Promise<ExportCo
       }
     });
 
-    childProcess.on('error', (error: Error) => {
+    childProcess.on('error', (error: NodeJS.ErrnoException) => {
       console.error(`[${new Date().toLocaleTimeString()}] Cookie导出进程错误: ${error.message}`);
-      resolve({ success: false, error: error.message });
+      resolve({ success: false, error: describeSpawnError('yt-dlp', ytDlpPath, error) });
     });
 
     const timeoutMs = (config.timeouts?.exportCookies ?? 30) * 1000;
@@ -962,9 +986,9 @@ export async function getPlaylistInfo(params: {
       }
     });
 
-    childProcess.on('error', (error: Error) => {
+    childProcess.on('error', (error: NodeJS.ErrnoException) => {
       clearTimeout(timeout);
-      reject(new Error(`Failed to start yt-dlp: ${error.message}`));
+      reject(new Error(describeSpawnError('yt-dlp', ytDlpPath, error)));
     });
   });
 }

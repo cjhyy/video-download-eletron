@@ -38,6 +38,8 @@ export const IPCChannels = {
   // 下载二进制文件（精简版）
   DOWNLOAD_BINARY: 'download-binary',
   DOWNLOAD_BINARY_PROGRESS: 'download-binary-progress',
+  // 修复二进制文件权限（补 chmod，不行回退重下）
+  REPAIR_BINARY: 'repair-binary',
 } as const;
 
 export type IPCChannel = (typeof IPCChannels)[keyof typeof IPCChannels];
